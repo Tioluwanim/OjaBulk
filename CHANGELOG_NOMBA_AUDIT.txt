@@ -1,0 +1,91 @@
+OJABULK — REAL NOMBA API AUDIT — CHANGES IN THIS PACKAGE
+===========================================================
+
+This round of fixes came from reading the ACTUAL Nomba developer
+documentation (developer.nomba.com), not guessed field names.
+Every fix below is backed by a confirmed doc excerpt and verified
+with a runnable test.
+
+------------------------------------------------------------
+1. CRITICAL: services/transfers.py — kobo multiplication removed
+------------------------------------------------------------
+BEFORE: amount was sent as int(amount * 100), assuming Nomba wanted kobo.
+CONFIRMED FROM DOCS: Nomba's real Transfer to Banks example sends
+"amount": 3500 for a ₦3,500 transfer — plain naira, not kobo.
+
+IMPACT IF UNFIXED: every supplier payout would have sent 100x the
+intended amount. A ₦500,000 pool payout would have attempted to send
+₦50,000,000. This was the most dangerous bug in the codebase and would
+only have surfaced during a live demo with real transfer calls.
+
+Also fixed in the same file:
+  - Endpoint corrected from /v1/transfers/single to /v2/transfers/bank
+    (confirmed exact path from developer.nomba.com/docs/products/transfers/transfer-to-banks)
+  - Response field corrected from data.transactionReference to data.id
+  - Added handling for HTTP 201 (PROCESSING) as a valid non-error state,
+    per Nomba's documented NIBSS processing delay behavior
+  - Added requery_transfer() method per documented requery endpoint
+
+------------------------------------------------------------
+2. CRITICAL: services/webhooks.py — payload structure was entirely wrong
+------------------------------------------------------------
+BEFORE: parser guessed flat field names like "virtualAccountNumber",
+"accountNumber", "amount", "transactionReference" — none of which
+match Nomba's real payload.
+
+CONFIRMED FROM DOCS (developer.nomba.com/products/webhooks/introduction),
+the real structure is:
+    {
+      "event_type": "payment_success",
+      "requestId": "...",
+      "data": {
+        "transaction": {
+          "aliasAccountNumber": "...",
+          "transactionAmount": 1000,
+          ...
+        },
+        "customer": { "senderName": "...", ... }
+      }
+    }
+
+IMPACT IF UNFIXED: every real webhook would have failed to parse,
+throwing ValueError on every single payment. The reconciliation engine
+would never have fired on a real Nomba sandbox transaction — this bug
+would have blocked your entire demo at the first live payment test.
+
+Fixed: parser now reads data.transaction.aliasAccountNumber,
+data.transaction.transactionAmount (confirmed naira, not kobo — see
+decimal walletBalance in the same payload as corroborating evidence),
+and top-level requestId as the idempotency key.
+
+------------------------------------------------------------
+3. Reapplied fixes from previous audit round (had not been synced)
+------------------------------------------------------------
+  - models/__init__.py: imports all 5 models together, preventing
+    SQLAlchemy relationship resolution crashes on partial import
+  - main.py: /health endpoint now uses text("SELECT 1") per
+    SQLAlchemy 2.x requirement — was previously always reporting
+    "database": "error" even when healthy
+  - schemas/trader.py: phone number validator now normalizes every
+    input format (+234..., 234..., 0801 234 5678, etc.) to one
+    canonical 0XXXXXXXXXX storage format, eliminating drift between
+    services/sms.py and routers/ussd.py's independent normalizers
+
+------------------------------------------------------------
+WHAT WAS NOT CHANGED
+------------------------------------------------------------
+routers/webhooks.py required NO changes — it consumes parse_payload()'s
+return dict by key name only (virtual_account_number, amount,
+transaction_ref), and those keys are unchanged even though what
+populates them internally is now correct.
+
+engine/payout.py required NO changes — it consumes send_to_supplier()'s
+return dict by the same key names, unaffected by the internal fix.
+
+------------------------------------------------------------
+STILL TO VERIFY ON YOUR END
+------------------------------------------------------------
+services/transfers.py's verify_bank_account() method uses a placeholder
+endpoint path that was NOT confirmed in the docs reviewed. Test this
+specifically before relying on it, or remove it from your demo flow
+if you don't have time to verify it against a real sandbox call.

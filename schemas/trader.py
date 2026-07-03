@@ -30,9 +30,24 @@ class TraderCreate(BaseModel):
     @field_validator("phone")
     @classmethod
     def clean_phone(cls, v: str) -> str:
+        """
+        Normalizes every phone number to the canonical storage format:
+        0XXXXXXXXXX (11 digits, leading 0 — standard Nigerian local format).
+        """
         v = v.strip().replace(" ", "").replace("-", "")
+
+        if v.startswith("+234"):
+            v = "0" + v[4:]
+        elif v.startswith("234") and len(v) == 13:
+            v = "0" + v[3:]
+
         if not v.isdigit():
             raise ValueError("phone must contain only digits")
+        if not v.startswith("0") or len(v) != 11:
+            raise ValueError(
+                "phone must be a valid Nigerian number "
+                "(11 digits starting with 0, e.g. 08012345678)"
+            )
         return v
 
     @field_validator("name", "stall_number", "market_name")

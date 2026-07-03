@@ -20,10 +20,10 @@ from core.database import engine, Base
 from background.pool_expiry_checker import create_scheduler
 
 # Import all models so Base.metadata.create_all picks them up
-from models import trader, pool, pool_contribution, payment, ledger_entry  # noqa: F401
+import models  # noqa: F401
 
 # Import routers
-from router import traders, pools, webhooks, reports, ussd
+from routers import traders, pools, webhooks, reports, ussd
 
 
 # ── Lifespan (startup + shutdown) ─────────────────────────────────────────
@@ -120,13 +120,14 @@ async def health():
     """
     from core.database import SessionLocal
     from services.client import nomba_client
+    from sqlalchemy import text
 
     db_ok = False
     nomba_ok = False
 
     try:
         db = SessionLocal()
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db.close()
         db_ok = True
     except Exception as e:

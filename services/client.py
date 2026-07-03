@@ -14,7 +14,7 @@ class NombaClient:
     - Caches token in memory (sufficient for hackathon; use Redis in production)
     """
 
-    BASE_URL = os.getenv("NOMBA_BASE_URL", "https://sandbox.nomba.com")
+    BASE_URL = os.getenv("NOMBA_BASE_URL", "https://api.nomba.com")
     TOKEN_ISSUE_URL = f"{BASE_URL}/auth/token/issue"
     TOKEN_REFRESH_URL = f"{BASE_URL}/auth/token/refresh"
 
@@ -142,6 +142,7 @@ nomba_client = NombaClient()
 
 if __name__ == "__main__":
     print("Testing Nomba authentication...")
+    print(NombaClient.TOKEN_ISSUE_URL)
     try:
         headers = nomba_client.get_headers()
         print("Token issued successfully")

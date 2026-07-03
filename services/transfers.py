@@ -1,21 +1,29 @@
-"""
-services/transfers.py
-
-Nomba Transfers API — used exclusively for supplier payout when a pool hits target.
-
-This file has one job: send money from OjaBulk's Nomba account
-to a supplier's bank account. Nothing else.
-"""
-
-import requests
 import os
+import requests
+
 from services.client import nomba_client
 
 
 class NombaTransferService:
+    """
+    Nomba Transfers API.
 
-    BASE_URL = os.getenv("NOMBA_BASE_URL", "https://sandbox.nomba.com/v1")
-    TRANSFERS_URL = f"{BASE_URL}/transfers/single"
+    Used for supplier payouts when a pool reaches target.
+    """
+
+    BASE_URL_V2 = os.getenv(
+        "NOMBA_BASE_URL_V2",
+        "https://sandbox.nomba.com/v2"
+    ).rstrip("/")
+
+    BASE_URL_V1 = os.getenv(
+        "NOMBA_BASE_URL",
+        "https://sandbox.nomba.com/v1"
+    ).rstrip("/")
+
+    TRANSFERS_URL = (
+        f"{BASE_URL_V2}/transfers/bank"
+    )
 
     def send_to_supplier(
         self,
@@ -27,37 +35,28 @@ class NombaTransferService:
         supplier_name: str,
     ) -> dict:
         """
-        Sends pooled funds to a supplier's bank account.
-        Called only by engine/payout.py when a pool reaches its target.
-
-        Args:
-            pool_id:                  Pool UUID — used as transfer reference
-            pool_title:               Pool name — used in narration
-            amount:                   Total naira to send (pool.current_locked_amount)
-            supplier_account_number:  Supplier's NUBAN
-            supplier_bank_code:       Supplier's bank code
-            supplier_name:            Supplier's name for narration
-
-        Returns:
-            {
-                "transfer_ref":   str,   # Nomba's reference for this transfer
-                "status":         str,   # success / pending / failed
-                "amount":         float,
-            }
-
-        Raises:
-            ConnectionError: Network failure
-            PermissionError: Auth or insufficient funds (4xx)
-            ValueError:      Unexpected response structure
+        Send payout to supplier.
         """
+
+        if amount <= 0:
+            raise ValueError(
+                "Transfer amount must be greater than zero."
+            )
+
+        merchant_tx_ref = (
+            f"ojabulk-pool-payout-{pool_id}"
+        )
+
         payload = {
-            "amount":        str(int(amount * 100)),  # Nomba expects kobo (smallest unit)
-            "bankCode":      supplier_bank_code,
+            "amount": float(amount),
             "accountNumber": supplier_account_number,
-            "accountName":   supplier_name,
-            "narration":     f"OjaBulk Pool Payout — {pool_title}",
-            "merchantTxRef": f"pool-payout-{pool_id}",
-            "currency":      "NGN",
+            "accountName": supplier_name,
+            "bankCode": supplier_bank_code,
+            "merchantTxRef": merchant_tx_ref,
+            "senderName": "OjaBulk",
+            "narration": (
+                f"OjaBulk Pool Payout - {pool_title}"
+            )[:100],
         }
 
         try:
@@ -65,80 +64,197 @@ class NombaTransferService:
                 self.TRANSFERS_URL,
                 headers=nomba_client.get_headers(),
                 json=payload,
-                timeout=30,  # Higher timeout — transfers can be slow
+                timeout=30,
             )
         except requests.exceptions.RequestException as e:
-            raise ConnectionError(f"Transfer request failed: {e}")
-
-        if response.status_code not in (200, 201):
-            raise PermissionError(
-                f"Transfer failed [{response.status_code}]: {response.text}"
+            raise ConnectionError(
+                f"Transfer request failed: {e}"
             )
 
-        body = response.json()
+        print(
+            f"[DEBUG] transfer status: "
+            f"{response.status_code}"
+        )
+        print(
+            f"[DEBUG] transfer body: "
+            f"{response.text}"
+        )
 
         try:
-            data = body.get("data", {})
+            body = response.json()
+        except Exception:
+            body = {}
+
+        if response.status_code == 201:
             return {
-                "transfer_ref": data.get("transactionReference", f"pool-payout-{pool_id}"),
-                "status":       data.get("status", "success"),
-                "amount":       amount,
+                "transfer_ref": merchant_tx_ref,
+                "status": "PROCESSING",
+                "amount": amount,
+                "is_pending": True,
             }
-        except (KeyError, TypeError) as e:
-            raise ValueError(
-                f"Unexpected transfer response structure: {e}"
-                f"\nFull response: {body}"
+
+        if response.status_code != 200:
+            raise PermissionError(
+                f"Transfer failed "
+                f"[{response.status_code}]: "
+                f"{response.text}"
             )
 
-    def verify_bank_account(
+        data = body.get("data", {})
+
+        return {
+            "transfer_ref": data.get(
+                "id",
+                merchant_tx_ref
+            ),
+            "status": data.get(
+                "status",
+                "SUCCESS"
+            ),
+            "amount": amount,
+            "is_pending": False,
+        }
+
+    def requery_transfer(
         self,
-        account_number: str,
-        bank_code: str,
+        transaction_ref: str,
+        sub_account_id: str | None = None,
     ) -> dict:
         """
-        Verifies a supplier's bank account before adding them to a pool.
-        Prevents payouts to wrong accounts.
+        Requery transfer status.
 
-        Returns:
-            {
-                "account_number": str,
-                "account_name":   str,
-                "bank_code":      str,
-            }
+        Verify this endpoint against your
+        Nomba dashboard documentation.
         """
-        url = f"{self.BASE_URL}/transfers/banks/verify-account"
+
+        if sub_account_id:
+            url = (
+                f"{self.BASE_URL_V1}"
+                f"/transactions/accounts/"
+                f"{sub_account_id}/single"
+            )
+        else:
+            url = (
+                f"{self.BASE_URL_V1}"
+                f"/transactions/accounts/single"
+            )
 
         try:
-            response = requests.post(
+            response = requests.get(
                 url,
                 headers=nomba_client.get_headers(),
-                json={
-                    "accountNumber": account_number,
-                    "bankCode":      bank_code,
+                params={
+                    "transactionRef": transaction_ref
                 },
                 timeout=10,
             )
         except requests.exceptions.RequestException as e:
-            raise ConnectionError(f"Bank verification request failed: {e}")
+            raise ConnectionError(
+                f"Transfer requery failed: {e}"
+            )
+
+        print(
+            f"[DEBUG] requery status: "
+            f"{response.status_code}"
+        )
+        print(
+            f"[DEBUG] requery body: "
+            f"{response.text}"
+        )
 
         if response.status_code != 200:
             raise PermissionError(
-                f"Bank verification failed [{response.status_code}]: {response.text}"
+                f"Transfer requery failed "
+                f"[{response.status_code}]: "
+                f"{response.text}"
             )
 
         body = response.json()
+        data = body.get("data", {})
+
+        return {
+            "transfer_ref": transaction_ref,
+            "status": data.get(
+                "status",
+                "UNKNOWN"
+            ),
+            "raw": data,
+        }
+
+    def get_banks(self) -> list:
+        """
+        Fetch supported banks.
+
+        Confirm endpoint path from docs.
+        """
+
+        url = (
+            f"{self.BASE_URL_V1}"
+            f"/transfers/banks"
+        )
+
         try:
-            data = body.get("data", {})
-            return {
-                "account_number": account_number,
-                "account_name":   data.get("accountName", ""),
-                "bank_code":      bank_code,
-            }
-        except (KeyError, TypeError) as e:
-            raise ValueError(
-                f"Unexpected verification response: {e}\nFull: {body}"
+            response = requests.get(
+                url,
+                headers=nomba_client.get_headers(),
+                timeout=10,
+            )
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(
+                f"Bank list request failed: {e}"
             )
 
+        print(
+            f"[DEBUG] banks status: "
+            f"{response.status_code}"
+        )
 
-# Single shared instance
-transfer_service = NombaTransferService()
+        if response.status_code != 200:
+            raise PermissionError(
+                f"Bank list failed "
+                f"[{response.status_code}]: "
+                f"{response.text}"
+            )
+
+        body = response.json()
+
+        return body.get(
+            "data",
+            []
+        )
+
+
+transfer_service = (
+    NombaTransferService()
+)
+
+
+if __name__ == "__main__":
+
+    print(
+        "Testing NombaTransferService..."
+    )
+
+    try:
+
+        banks = (
+            transfer_service.get_banks()
+        )
+
+        print(
+            f"Banks returned: "
+            f"{len(banks)}"
+        )
+
+        if banks:
+            print(
+                "First bank:"
+            )
+            print(
+                banks[0]
+            )
+
+    except Exception as e:
+        print(
+            f"Test failed: {e}"
+        )

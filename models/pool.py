@@ -1,18 +1,20 @@
 import uuid
 import enum
-from datetime import datetime
-from decimal import Decimal
-from typing import TYPE_CHECKING
-from sqlalchemy import Column, String, Numeric, DateTime, Enum, func
+
+from sqlalchemy import (
+    Column,
+    String,
+    Numeric,
+    DateTime,
+    Enum,
+    Integer,
+    Index,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from core.database import Base
 
-# This ensures relations are only imported by type checkers, preventing circular imports at runtime
-if TYPE_CHECKING:
-    from models.pool_contribution import PoolContribution
-    from models.ledger_entry import LedgerEntry
-    from models.payment import Payment
+from core.database import Base
 
 
 class PoolStatus(str, enum.Enum):
@@ -22,45 +24,148 @@ class PoolStatus(str, enum.Enum):
 
 
 class Pool(Base):
+    """
+    Group-buying pool.
+
+    Money is locked here until either:
+
+    1. Target amount is reached → payout
+    2. Deadline expires → refund
+    """
+
     __tablename__ = "pools"
 
-    # --- IDE Static Analysis Type Hints ---
-    id: uuid.UUID
-    title: str
-    target_amount: Decimal
-    current_locked_amount: Decimal
-    supplier_name: str
-    supplier_account_number: str
-    supplier_bank_code: str
-    status: PoolStatus
-    deadline: datetime
-    created_at: datetime
-    fulfilled_at: datetime | None
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
 
-    # Wrapped in quotes to resolve type definitions as forward references safely
-    contributions: list["PoolContribution"]
-    ledger_entries: list["LedgerEntry"]
-    payments: list["Payment"]
-    # --------------------------------------
+    # --------------------------------------------------
+    # Basic Information
+    # --------------------------------------------------
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    title = Column(String, nullable=False)
+    title = Column(
+        String,
+        nullable=False,
+    )
 
-    target_amount = Column(Numeric(precision=18, scale=2), nullable=False)
-    current_locked_amount = Column(Numeric(precision=18, scale=2), default=0, nullable=False)
+    description = Column(
+        String,
+        nullable=True,
+    )
 
-    # Supplier payout details
-    supplier_name = Column(String, nullable=False)
-    supplier_account_number = Column(String, nullable=False)
-    supplier_bank_code = Column(String, nullable=False)
+    # --------------------------------------------------
+    # Funding
+    # --------------------------------------------------
 
-    status = Column(Enum(PoolStatus), default=PoolStatus.OPEN, nullable=False)
-    deadline = Column(DateTime(timezone=True), nullable=False)
+    target_amount = Column(
+        Numeric(18, 2),
+        nullable=False,
+    )
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    fulfilled_at = Column(DateTime(timezone=True), nullable=True)
+    current_locked_amount = Column(
+        Numeric(18, 2),
+        nullable=False,
+        default=0,
+    )
 
+    fulfilled_amount = Column(
+        Numeric(18, 2),
+        nullable=False,
+        default=0,
+    )
+
+    minimum_contributors = Column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+    # --------------------------------------------------
+    # Supplier
+    # --------------------------------------------------
+
+    supplier_name = Column(
+        String,
+        nullable=False,
+    )
+
+    supplier_account_number = Column(
+        String,
+        nullable=False,
+    )
+
+    supplier_bank_code = Column(
+        String,
+        nullable=False,
+    )
+
+    # --------------------------------------------------
+    # Nomba Transfer Tracking
+    # --------------------------------------------------
+
+    nomba_transfer_ref = Column(
+        String,
+        nullable=True,
+    )
+
+    # --------------------------------------------------
+    # Lifecycle
+    # --------------------------------------------------
+
+    status = Column(
+        Enum(PoolStatus),
+        nullable=False,
+        default=PoolStatus.OPEN,
+    )
+
+    deadline = Column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    fulfilled_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    refunded_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # --------------------------------------------------
     # Relationships
-    contributions = relationship("PoolContribution", back_populates="pool")
-    ledger_entries = relationship("LedgerEntry", back_populates="pool")
-    payments = relationship("Payment", back_populates="pool")
+    # --------------------------------------------------
+
+    contributions = relationship(
+        "PoolContribution",
+        back_populates="pool",
+        cascade="all, delete-orphan",
+    )
+
+    ledger_entries = relationship(
+        "LedgerEntry",
+        back_populates="pool",
+        cascade="all, delete-orphan",
+    )
+
+    payments = relationship(
+        "Payment",
+        back_populates="pool",
+    )
+
+    # --------------------------------------------------
+    # Indexes
+    # --------------------------------------------------
+
+    __table_args__ = (
+        Index("idx_pool_status", "status"),
+        Index("idx_pool_deadline", "deadline"),
+    )
