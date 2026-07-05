@@ -1,14 +1,23 @@
 """
 services/reports.py
 
-Fetches real Nomba account balance for the reconciliation report.
+Fetches real Nomba sub-account balance for the reconciliation report.
 
 The reconciliation report compares:
     sum(all trader spendable_balances) + sum(all open pool current_locked_amounts)
     vs
-    real Nomba account balance from this service
+    real Nomba SUB-ACCOUNT balance from this service
 
 If they match — our ledger is provably correct.
+
+CORRECTED per the Nomba hackathon organizer's confirmed API reference:
+this must check the SUB-ACCOUNT balance (GET /v1/accounts/{subAccountId}/balance),
+not the parent account balance (GET /v1/accounts/balance). Every trader's
+virtual account is created under the sub-account, so that is where the
+actual pooled money lives. Checking the parent balance here would compare
+our ledger against an account that never received the money in the first
+place — producing a permanent, unexplainable mismatch even when the
+system is working correctly.
 """
 
 import requests
@@ -19,11 +28,18 @@ from services.client import nomba_client
 class NombaReportsService:
 
     BASE_URL = os.getenv("NOMBA_BASE_URL", "https://sandbox.nomba.com/v1")
-    BALANCE_URL = f"{BASE_URL}/accounts/balance"
+
+    def _balance_url(self) -> str:
+        """
+        Sub-account-scoped balance URL, per organizer spec:
+        GET /v1/accounts/{subAccountId}/balance
+        """
+        return f"{self.BASE_URL}/accounts/{nomba_client.subaccount_id}/balance"
 
     def get_account_balance(self) -> dict:
         """
-        Fetches the real balance of OjaBulk's parent Nomba account.
+        Fetches the real balance of OjaBulk's sub-account — the account
+        that actually holds pooled trader funds.
 
         Returns:
             {
@@ -39,7 +55,7 @@ class NombaReportsService:
         """
         try:
             response = requests.get(
-                self.BALANCE_URL,
+                self._balance_url(),
                 headers=nomba_client.get_headers(),
                 timeout=10,
             )
@@ -48,7 +64,7 @@ class NombaReportsService:
 
         if response.status_code != 200:
             raise PermissionError(
-                f"Account balance fetch failed "
+                f"Sub-account balance fetch failed "
                 f"[{response.status_code}]: {response.text}"
             )
 
@@ -69,7 +85,8 @@ class NombaReportsService:
 
     def reconcile(self, our_ledger_total: float) -> dict:
         """
-        Compares our PostgreSQL ledger total against the real Nomba balance.
+        Compares our PostgreSQL ledger total against the real Nomba
+        sub-account balance.
 
         Args:
             our_ledger_total: sum(spendable_balance) + sum(current_locked_amount)

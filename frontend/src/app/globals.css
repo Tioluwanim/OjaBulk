@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+@theme {
+  /* Base */
+  --color-cream: #FBF7EF;
+  --color-cream-dark: #F3ECDD;
+  --color-charcoal: #1C1A16;
+  --color-charcoal-soft: #3A362E;
+
+  /* Gold accent system */
+  --color-gold-50: #FBF3DF;
+  --color-gold-100: #F5E4B8;
+  --color-gold-200: #EACB7C;
+  --color-gold-300: #DDB454;
+  --color-gold-400: #D3A335;
+  --color-gold-500: #C9971F;
+  --color-gold-600: #A87A16;
+  --color-gold-700: #805C11;
+  --color-gold-800: #5A400C;
+  --color-gold-900: #332406;
+  --color-gold: #C9971F;
+
+  /* Functional states */
+  --color-success: #2F7D5A;
+  --color-success-bg: #E8F3EC;
+  --color-danger: #B33A3A;
+  --color-danger-bg: #F7E9E9;
+  --color-info: #3A5FA8;
+  --color-info-bg: #E9EEF7;
+
+  /* Surfaces */
+  --color-surface: #FFFFFF;
+  --color-surface-border: #E8E0CE;
+
+  /* Fonts */
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), system-ui, sans-serif;
+
+  /* Cinematic display scale */
+  --text-display-xl: clamp(3rem, 8vw, 6.5rem);
+  --text-display-xl--line-height: 1.02;
+  --text-display-xl--letter-spacing: -0.02em;
+
+  --text-display-lg: clamp(2.25rem, 5vw, 4rem);
+  --text-display-lg--line-height: 1.05;
+  --text-display-lg--letter-spacing: -0.02em;
+
+  --text-display-md: clamp(1.75rem, 3.5vw, 2.75rem);
+  --text-display-md--line-height: 1.1;
+  --text-display-md--letter-spacing: -0.01em;
+
+  /* Shadows */
+  --shadow-card: 0 2px 8px rgba(28, 26, 22, 0.04), 0 1px 2px rgba(28, 26, 22, 0.06);
+  --shadow-card-hover: 0 8px 24px rgba(28, 26, 22, 0.08), 0 2px 4px rgba(28, 26, 22, 0.06);
+  --shadow-gold: 0 4px 20px rgba(201, 151, 31, 0.25);
+
+  /* Radius */
+  --radius-xl2: 1.25rem;
+
+  /* Animations */
+  --animate-fade-up: fadeUp 0.7s ease-out forwards;
+  --animate-count-up: countUp 0.4s ease-out forwards;
+}
+
+@keyframes fadeUp {
+  0% { opacity: 0; transform: translateY(24px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes countUp {
+  0% { opacity: 0; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  ::selection {
+    background-color: #C9971F;
+    color: #FBF7EF;
+  }
+}
+
+@layer components {
+  .container-oja {
+    @apply mx-auto max-w-7xl px-6 md:px-10;
+  }
+
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-gold-500 px-7 py-3.5
+           font-display font-semibold text-cream shadow-gold transition-all duration-200
+           hover:bg-gold-600 hover:shadow-lg active:scale-[0.98];
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border-2 border-charcoal/15
+           bg-transparent px-7 py-3.5 font-display font-semibold text-charcoal transition-all duration-200
+           hover:border-charcoal/40 active:scale-[0.98];
+  }
+
+  .card-surface {
+    @apply rounded-xl2 border border-surface-border bg-surface shadow-card;
+  }
+}

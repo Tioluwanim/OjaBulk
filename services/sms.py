@@ -138,6 +138,22 @@ class SMSService:
         )
         return self._send(phone, message)
 
+    def send_otp_code(
+        self,
+        phone: str,
+        code: str,
+    ) -> bool:
+        """
+        Sends a login OTP code. Used by services/auth.py for all three
+        login roles (trader, head_of_traders, wholesaler) — the OTP
+        flow itself is identical regardless of role.
+        """
+        message = (
+            f"OjaBulk login code: {code}\n"
+            f"Valid for 10 minutes. Do not share this code with anyone."
+        )
+        return self._send(phone, message)
+
 
 # Single shared instance
 sms_service = SMSService()

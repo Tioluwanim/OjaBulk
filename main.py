@@ -23,7 +23,7 @@ from background.pool_expiry_checker import create_scheduler
 import models  # noqa: F401
 
 # Import routers
-from routers import traders, pools, webhooks, reports, ussd
+from routers import traders, pools, webhooks, reports, ussd, auth
 
 
 # ── Lifespan (startup + shutdown) ─────────────────────────────────────────
@@ -81,6 +81,7 @@ app.add_middleware(
 
 # ── Routers ────────────────────────────────────────────────────────────────
 
+app.include_router(auth.router,     prefix="/auth",             tags=["Auth"])
 app.include_router(traders.router,  prefix="/traders",          tags=["Traders"])
 app.include_router(pools.router,    prefix="/pools",            tags=["Pools"])
 app.include_router(webhooks.router, prefix="/webhooks",         tags=["Webhooks"])

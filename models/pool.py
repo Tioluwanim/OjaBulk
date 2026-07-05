@@ -9,6 +9,7 @@ from sqlalchemy import (
     Enum,
     Integer,
     Index,
+    ForeignKey,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -52,6 +53,23 @@ class Pool(Base):
 
     description = Column(
         String,
+        nullable=True,
+    )
+
+    # The market this pool belongs to. A Head of Traders may only
+    # create pools where this matches their Identity.market_name —
+    # enforced in routers/pools.py, not just a display field.
+    market_name = Column(
+        String,
+        nullable=True,
+    )
+
+    # Which Identity created this pool (admin or head_of_traders).
+    # Used to prove the market-scoping rule was actually enforced at
+    # creation time, and for audit purposes.
+    created_by_identity_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("identities.id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -140,6 +158,16 @@ class Pool(Base):
         nullable=True,
     )
 
+    # Set when the wholesaler logs in and confirms they have received
+    # the order / payout. This is a NEW piece of state — previously a
+    # pool went straight from "fulfilled" to nothing. NULL means the
+    # wholesaler has not yet confirmed, even if the pool is fulfilled
+    # and the transfer succeeded on Nomba's side.
+    wholesaler_confirmed_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     # --------------------------------------------------
     # Relationships
     # --------------------------------------------------
@@ -161,6 +189,11 @@ class Pool(Base):
         back_populates="pool",
     )
 
+    created_by = relationship(
+        "Identity",
+        foreign_keys=[created_by_identity_id],
+    )
+
     # --------------------------------------------------
     # Indexes
     # --------------------------------------------------
@@ -168,4 +201,5 @@ class Pool(Base):
     __table_args__ = (
         Index("idx_pool_status", "status"),
         Index("idx_pool_deadline", "deadline"),
+        Index("idx_pool_market", "market_name"),
     )

@@ -1,0 +1,205 @@
+OJABULK — 3-ROLE AUTH, SELF-SERVICE ENDPOINTS, WHOLESALER VIEW
+==================================================================
+This changelog covers everything added on top of the sub-account
+architecture fix (see CHANGELOG_SUBACCOUNT_ARCHITECTURE.txt for that
+earlier, separate round of fixes).
+
+------------------------------------------------------------
+NEW: three-role login system
+------------------------------------------------------------
+models/identity.py     -- Identity table: trader | head_of_traders |
+                           wholesaler, identified by phone, OTP login
+models/otp_session.py  -- short-lived OTP codes, single-use, expiring
+services/auth.py       -- OTP generation (secrets, not random),
+                           verification, JWT session tokens,
+                           get_current_identity / get_current_identity_optional
+                           dependencies, require_role() dependency factory
+routers/auth.py        -- POST /auth/request-otp, POST /auth/verify-otp,
+                           POST /auth/identities (admin-gated, creates
+                           head_of_traders/wholesaler logins)
+
+------------------------------------------------------------
+NEW: market-scoped pool creation
+------------------------------------------------------------
+models/pool.py extended with market_name, created_by_identity_id,
+wholesaler_confirmed_at.
+
+routers/pools.py: POST /pools now requires a HEAD_OF_TRADERS identity
+and enforces payload.market_name == identity.market_name — a Head of
+Onitsha Market cannot create a pool for Alaba Market. This also closes
+a previously wide-open security gap: POST /pools had ZERO auth before
+this, meaning anyone could create a fake pool with their own bank
+account as "supplier."
+
+------------------------------------------------------------
+NEW: wholesaler order confirmation
+------------------------------------------------------------
+routers/pools.py: POST /pools/{id}/confirm-order — wholesaler
+acknowledges receipt of payout. Guarded by:
+  - role check (must be WHOLESALER)
+  - pool must be FULFILLED (can't confirm a pool that hasn't paid out)
+  - ownership check: identity.business_name must match pool.supplier_name
+  - idempotency: cannot confirm the same order twice (400 on retry)
+
+------------------------------------------------------------
+NEW: trader self-service endpoints (closes the exposed-data gap)
+------------------------------------------------------------
+Previously: GET /traders/{id} required no auth at all — anyone who
+guessed or was given a UUID could view any trader's balance. That
+endpoint is UNCHANGED (still used by the admin/Head-of-Traders
+dashboard, which has its own access model), but traders now have a
+SEPARATE, safer path that never exposes another trader's data:
+
+routers/traders.py:
+  GET /traders/me         -- logged-in trader's own profile + balance
+  GET /traders/me/ledger  -- logged-in trader's own full ledger history
+  GET /traders/me/pools   -- every pool the trader has ever contributed
+                             to (locked, released, or refunded)
+
+All three resolve via identity.linked_trader_id from the verified
+session token — NEVER from a client-supplied trader_id. It is
+structurally impossible to view someone else's balance through these
+routes, regardless of what a malicious client sends.
+
+IMPORTANT: these are declared BEFORE GET /{trader_id} in the file.
+FastAPI matches routes in declaration order, and /{trader_id} would
+otherwise greedily match the literal string "me" as a path parameter,
+producing a confusing 422 instead of reaching the /me handler.
+
+Trader registration (POST /traders) was also updated to automatically
+create the linked Identity row at signup, so a trader can log in
+immediately after registering — this didn't happen before.
+
+------------------------------------------------------------
+NEW: wholesaler dashboard view
+------------------------------------------------------------
+routers/pools.py: GET /pools?supplier=me
+
+  - No query param: unchanged, public, unfiltered (exactly as before)
+  - ?supplier=me with no auth: 401
+  - ?supplier=me as a non-wholesaler role: 403
+  - ?supplier=me as a wholesaler: returns ONLY pools where
+    pool.supplier_name == identity.business_name
+  - Any other ?supplier= value: 422 (typos are visible, not silently
+    ignored)
+
+Uses the new get_current_identity_optional dependency — the route
+stays genuinely public by default, but layers in identity-aware
+filtering only when a caller happens to be authenticated. Confirmed
+by test that two different wholesalers see correctly isolated,
+non-overlapping results.
+
+------------------------------------------------------------
+NEW: lightweight admin gate
+------------------------------------------------------------
+core/config.py: ADMIN_API_KEY setting, checked via the X-Admin-Key
+header on POST /auth/identities. This is deliberately NOT a full
+admin role inside the Identity/JWT system — see the inline comment
+in core/config.py for the scoping reasoning. Warns loudly at startup
+if left on its insecure dev default.
+
+------------------------------------------------------------
+requirements.txt
+------------------------------------------------------------
+Added pyjwt==2.7.0
+
+------------------------------------------------------------
+NEW: Alembic migration for the new schema
+------------------------------------------------------------
+alembic/versions/6a297d131e45_..._.py
+
+The existing alembic/versions/c22080659485_add_users_table.py migration
+(despite its filename) predates this session's work and had ZERO
+knowledge of Identity, OTPSession, or the new Pool columns
+(market_name, created_by_identity_id, wholesaler_confirmed_at). If you
+are using `alembic upgrade head` against a real Postgres database
+(not just Base.metadata.create_all(), which every test in this
+project used up to this point), running only the old migration would
+have produced an INCOMPLETE schema — POST /pools would have crashed
+the moment it tried to write market_name, since that column would not
+exist.
+
+Generated a second migration via `alembic revision --autogenerate`
+against the current models, then hand-cleaned it: the raw autogenerate
+output also included a large number of no-op "NUMERIC to UUID" column
+type changes on every existing table. Confirmed these are a SQLite
+comparator artifact (SQLite has no native UUID type, so Alembic's
+SQLite-dialect autogenerate misreports every UUID column as changed,
+even ones nothing touched) — removed them, keeping only the genuine
+changes: the two new tables and the three new Pool columns/index/FK.
+
+VERIFIED:
+    - Fresh SQLite db + old migration + new migration -> correct
+      final schema, confirmed by direct introspection (all 8 tables
+      present, all 3 new Pool columns present, FK to identities(id)
+      confirmed present via PRAGMA foreign_key_list)
+    - Downgrade correctly removes identities/otp_sessions and reverts
+      Pool's new columns; re-upgrade works cleanly afterward
+    - Had to switch the FK creation to Alembic's batch_alter_table
+      mode, since plain SQLite cannot ALTER a table to add a foreign
+      key constraint after creation at all (a genuine SQLite
+      limitation, not a bug). Batch mode is a documented no-op wrapper
+      on Postgres — it does not change behavior on your real target
+      database, it only exists to make SQLite testing possible.
+
+NOT FULLY VERIFIED, BE AWARE:
+    Every server_default=sa.text('now()') in both the old and new
+    migration is POSTGRES-ONLY SQL — SQLite has no now() function
+    (it uses CURRENT_TIMESTAMP instead). This is not a defect in the
+    new migration — it is IDENTICAL to how every existing table's
+    created_at/updated_at column was already written before this
+    session touched anything, confirmed by grep against the original
+    c22080659485 migration. Since your DATABASE_URL has been
+    postgresql:// throughout this entire project, this was always
+    the correct syntax for your real target — but it also means this
+    specific migration could not be fully end-to-end verified inside
+    this sandboxed testing environment, which has no Postgres
+    instance available (network-restricted, could not install one).
+    The migration's STRUCTURE (tables, columns, indexes, FK) was
+    verified directly via a SQLite now()-shim workaround; the exact
+    Postgres now() execution was verified only by code-consistency
+    with your existing, already-deployed tables, not by a literal
+    Postgres run. Run `alembic upgrade head` against your real
+    Postgres database once, before Sunday, to close this gap for real.
+
+------------------------------------------------------------
+EVERYTHING BELOW WAS RE-VERIFIED WORKING TOGETHER
+------------------------------------------------------------
+Full regression test confirms: real-shaped Nomba webhook -> HMAC
+verification -> reconciliation engine -> pool fulfillment -> payout
+correctly fired against the sub-account-scoped transfer URL — all
+still works with zero breakage after adding the entire auth layer,
+market-scoping, wholesaler confirmation, trader self-service
+endpoints, and the wholesaler dashboard filter.
+
+Total: 25+ distinct test scenarios run against real HTTP requests
+through the actual FastAPI app and a real SQLite database across this
+session (not just isolated unit tests) — including several genuine
+bugs found and fixed DURING testing, not just written and assumed
+correct:
+  - engine/payout.py referencing a nonexistent pool.sub_account_id
+    field (would have crashed every successful pool payout)
+  - get_current_identity comparing a UUID string against a UUID
+    column type (same bug class fixed twice before elsewhere in the
+    project, recurred in new code)
+  - seed script double-counting a pool's locked amount
+
+------------------------------------------------------------
+STILL GENUINELY REMAINING (not built, not tested, be honest about this)
+------------------------------------------------------------
+1. USSD balance check — scoped weeks ago, never confirmed built or
+   tested against Africa's Talking sandbox.
+2. Real SMS sending — everything tested so far mocks sms_service.
+   Confirm TERMII_API_KEY is real and test one actual SMS delivery.
+3. Real Nomba sandbox calls — every Nomba-facing test in this project
+   mocks the HTTP layer against the documented payload/response
+   shapes. You still need ONE real virtual account creation, ONE real
+   transfer, and ONE real webhook delivery against the actual Nomba
+   sandbox servers to prove these URLs work in reality, not just
+   against shapes matching the docs.
+4. Frontend integration — nothing in this backend work touches your
+   Next.js dashboard. It needs to call /auth/request-otp,
+   /auth/verify-otp, store the JWT, and send it on every subsequent
+   request (traders/me, pools?supplier=me, etc.)
+5. Deploy + register the real webhook URL on Render, pointing at your
+   live URL, not localhost.

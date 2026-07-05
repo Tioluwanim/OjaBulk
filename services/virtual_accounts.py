@@ -55,10 +55,6 @@ class NombaVirtualAccountService:
                 f"Virtual account creation failed: {e}"
             )
 
-        print(f"[DEBUG] create url: {url}")
-        print(f"[DEBUG] create status: {response.status_code}")
-        print(f"[DEBUG] create body: {response.text}")
-
         if response.status_code == 409:
             return self.fetch(trader_id)
 
@@ -92,10 +88,6 @@ class NombaVirtualAccountService:
             raise ConnectionError(
                 f"Virtual account fetch failed: {e}"
             )
-
-        print(f"[DEBUG] fetch url: {url}")
-        print(f"[DEBUG] fetch status: {response.status_code}")
-        print(f"[DEBUG] fetch body: {response.text}")
 
         if response.status_code == 404:
             raise ValueError(
@@ -141,9 +133,6 @@ class NombaVirtualAccountService:
             raise ConnectionError(
                 f"Virtual account list failed: {e}"
             )
-
-        print(f"[DEBUG] list status: {response.status_code}")
-        print(f"[DEBUG] list body: {response.text}")
 
         if response.status_code != 200:
             raise PermissionError(

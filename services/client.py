@@ -12,17 +12,36 @@ class NombaClient:
     - Issues token via /auth/token/issue
     - Refreshes via /auth/token/refresh at 55-minute mark
     - Caches token in memory (sufficient for hackathon; use Redis in production)
+    - Exposes account_id (parent, used in the accountId header on every
+      call) and subaccount_id (used as the {subAccountId} path param on
+      every sub-account-scoped endpoint — virtual accounts, balance,
+      transactions, and transfers, per the Nomba hackathon organizer's
+      confirmed API reference).
+
+    ARCHITECTURE NOTE (updated from an earlier draft of this file):
+    Sub-accounts are the CONFIRMED, INTENDED architecture for this
+    project, per the Nomba hackathon organizer's own API reference:
+    every relevant endpoint (virtual account creation, balance, inflow
+    reconciliation, and outbound transfers) is scoped with a
+    {subAccountId} path parameter. This is not an experimental or
+    abandoned feature — it is the documented pattern for the
+    "Virtual Accounts as Infrastructure" track specifically. A prior
+    version of this file removed subaccount_id after an earlier
+    (incorrect) assumption that sub-accounts were not needed — that
+    assumption has since been corrected against the organizer's
+    verified endpoint list, and subaccount_id is required again.
     """
 
-    BASE_URL = os.getenv("NOMBA_BASE_URL", "https://api.nomba.com")
+    BASE_URL = os.getenv("NOMBA_BASE_URL", "https://sandbox.nomba.com/v1")
+    BASE_URL_V2 = os.getenv("NOMBA_BASE_URL_V2", "https://sandbox.nomba.com/v2")
     TOKEN_ISSUE_URL = f"{BASE_URL}/auth/token/issue"
     TOKEN_REFRESH_URL = f"{BASE_URL}/auth/token/refresh"
 
     def __init__(self):
         self.account_id = os.getenv("NOMBA_ACCOUNT_ID")
-        self.client_id = os.getenv("TEST_CLIENT_ID")
-        self.client_secret = os.getenv("TEST_CLIENT_SECRET")
         self.subaccount_id = os.getenv("NOMBA_SUB_ACCOUNT_ID")
+        self.client_id = os.getenv("NOMBA_CLIENT_ID")
+        self.client_secret = os.getenv("NOMBA_CLIENT_SECRET")
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_expires_at: datetime | None = None
@@ -34,8 +53,8 @@ class NombaClient:
             key for key, val in {
                 "NOMBA_ACCOUNT_ID": self.account_id,
                 "NOMBA_SUB_ACCOUNT_ID": self.subaccount_id,
-                "TEST_CLIENT_ID": self.client_id,
-                "TEST_CLIENT_SECRET": self.client_secret,
+                "NOMBA_CLIENT_ID": self.client_id,
+                "NOMBA_CLIENT_SECRET": self.client_secret,
             }.items() if not val
         ]
         if missing:

@@ -1,0 +1,130 @@
+OJABULK — SUB-ACCOUNT ARCHITECTURE CORRECTION
+================================================
+Source of truth: Nomba hackathon organizer's confirmed API reference
+(the "What to build - Nomba API project ideas (verified endpoints)"
+document), which explicitly scopes every relevant endpoint to a single
+{subAccountId} path parameter per business.
+
+------------------------------------------------------------
+WHY THIS CHANGED FROM THE PREVIOUS AUDIT
+------------------------------------------------------------
+An earlier audit round concluded sub-accounts should be abandoned in
+favor of a parent-account-only, ledger-only architecture. That
+conclusion was based on incomplete information at the time (403/404
+errors during early testing, before the organizer's confirmed spec was
+available). The organizer's reference document settles this
+definitively: sub-account scoping is the INTENDED architecture for the
+"Virtual Accounts as Infrastructure" track, not an optional or
+abandoned feature.
+
+------------------------------------------------------------
+CRITICAL BUG FOUND AND FIXED: engine/payout.py
+------------------------------------------------------------
+This bug would have crashed EVERY successful pool payout in the demo.
+
+BEFORE:
+    if not pool.sub_account_id:
+        raise ValueError(...)
+    transfer_service.send_to_supplier(
+        sub_account_id=pool.sub_account_id,
+        ...
+        narration=f"OjaBulk Pool {pool.title}",
+    )
+
+PROBLEM: pool.sub_account_id does not exist anywhere on the Pool model
+(confirmed by grep — zero matches in models/pool.py). This was a
+leftover from an incorrect assumption that each POOL needs its own
+sub-account. The organizer spec confirms there is ONE sub-account for
+the entire business — every trader's virtual account, and therefore
+every pool's funds, lives inside that single shared sub-account.
+
+Additionally, send_to_supplier()'s real signature takes pool_id and
+pool_title (not sub_account_id or narration) — so even if sub_account_id
+had existed on Pool, this call would still have raised a TypeError.
+
+IMPACT IF UNFIXED: the exact moment a pool hits its funding target —
+the single most important, most-demoed moment in the entire product —
+would throw AttributeError: 'Pool' object has no attribute
+'sub_account_id' and the payout would silently fail (caught by the
+try/except in engine/reconciliation.py, logged, but never executed).
+
+FIXED: trigger_payout() now calls send_to_supplier() with the correct
+signature (pool_id, pool_title, amount, supplier_account_number,
+supplier_bank_code, supplier_name) and no per-pool sub-account concept.
+The transfer service scopes to the business's single shared sub-account
+internally via nomba_client.subaccount_id.
+
+Verified with a full end-to-end test: webhook received -> reconciled ->
+pool hit target -> payout correctly fired against
+/v2/transfers/bank/{subAccountId} with the exact right payload -> pool
+marked fulfilled. See test output in session log.
+
+------------------------------------------------------------
+ARCHITECTURE CHANGES — EVERY FILE, PER ORGANIZER SPEC
+------------------------------------------------------------
+
+1. core/config.py
+   Added NOMBA_SUB_ACCOUNT_ID and NOMBA_BASE_URL_V2 as centralized,
+   validated settings (previously only read via a raw os.getenv() call
+   inside virtual_accounts.py, inconsistent with every other credential).
+
+2. services/client.py
+   Restored self.subaccount_id (previously removed in the earlier,
+   now-superseded audit round). Updated docstring to correct the prior
+   "explicitly abandoned" claim with the organizer's confirmed spec.
+
+3. services/virtual_accounts.py
+   Already correctly used /accounts/virtual/{subAccountId} for create()
+   and /accounts/virtual/{identifier} for fetch() — no endpoint change
+   needed. Removed leftover debug print() statements.
+
+4. services/transfers.py
+   CRITICAL FIX: send_to_supplier() now calls
+   POST /v2/transfers/bank/{subAccountId} (was: POST /v2/transfers/bank
+   with no subaccount scoping — would have tried to pay suppliers from
+   the parent account, which never receives any trader funds).
+   Also added lookup_account() per the organizer's confirmed
+   POST /v1/transfers/bank/lookup endpoint, and fixed requery_transfer()
+   to always scope to the shared sub-account.
+
+5. services/reports.py
+   CRITICAL FIX: get_account_balance() now calls
+   GET /v1/accounts/{subAccountId}/balance (was: GET /v1/accounts/balance
+   — the parent account, which never receives any trader funds). Without
+   this fix, the reconciliation report — your single biggest judging
+   differentiator — would have shown a permanent, unexplainable mismatch
+   even when the system was working perfectly, because it was comparing
+   your ledger against the wrong account entirely.
+
+6. engine/payout.py
+   CRITICAL FIX described above — removed the nonexistent
+   pool.sub_account_id reference and corrected the send_to_supplier()
+   call to match its real signature.
+
+7. .env.example
+   Added NOMBA_SUB_ACCOUNT_ID and NOMBA_BASE_URL_V2.
+
+------------------------------------------------------------
+VERIFIED URL PATTERNS (all tested and confirmed matching organizer spec)
+------------------------------------------------------------
+POST /v1/accounts/virtual/{subAccountId}        -- create VA
+GET  /v1/accounts/virtual/{identifier}           -- fetch VA
+GET  /v1/accounts/{subAccountId}/balance         -- reconciliation balance
+POST /v2/transfers/bank/{subAccountId}           -- supplier payout
+GET  /v1/transactions/accounts/{subAccountId}/single -- transfer requery
+POST /v1/transfers/bank/lookup                   -- verify supplier account
+GET  /v1/transfers/banks                         -- bank list (not scoped)
+
+------------------------------------------------------------
+WHAT YOU STILL NEED TO DO
+------------------------------------------------------------
+1. Add NOMBA_SUB_ACCOUNT_ID=<your real sub-account UUID> to your
+   actual .env file (not .env.example — that stays blank).
+2. Add NOMBA_BASE_URL_V2=https://sandbox.nomba.com/v2 to .env.
+3. Test one real sandbox virtual account creation and one real
+   sandbox transfer to confirm these URLs work against the live
+   sandbox, not just against this local mock-based test suite.
+4. The webhook payload structure (services/webhooks.py) was NOT
+   touched in this round — it was already correct from a previous
+   audit and does not need sub-account changes, since Nomba's webhook
+   payload structure does not reference sub-accounts at all.

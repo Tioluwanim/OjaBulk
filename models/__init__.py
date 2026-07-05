@@ -25,6 +25,8 @@ from models.pool import Pool, PoolStatus
 from models.pool_contribution import PoolContribution, ContributionStatus
 from models.payment import Payment
 from models.ledger_entry import LedgerEntry, EntryType
+from models.identity import Identity, IdentityRole
+from models.otp_session import OTPSession
 
 __all__ = [
     "Trader",
@@ -35,4 +37,7 @@ __all__ = [
     "Payment",
     "LedgerEntry",
     "EntryType",
+    "Identity",
+    "IdentityRole",
+    "OTPSession",
 ]

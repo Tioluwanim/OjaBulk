@@ -36,6 +36,17 @@ def trigger_payout(
     """
     Execute supplier payout.
 
+    CORRECTED: removed the pool.sub_account_id check and the
+    sub_account_id/narration kwargs passed to send_to_supplier().
+
+    There is ONE sub-account for the whole business (NOMBA_SUB_ACCOUNT_ID
+    in .env, read by services/client.py), not a separate sub-account per
+    pool. Every trader's virtual account — and therefore every pool's
+    pooled funds — lives inside that single shared sub-account. The
+    transfer service itself (services/transfers.py) already scopes the
+    outbound transfer URL to nomba_client.subaccount_id internally, so
+    this function does not need to know or pass a sub-account id at all.
+
     Returns:
     {
         "pool_id": str,
@@ -43,11 +54,6 @@ def trigger_payout(
         "transfer_ref": str,
     }
     """
-
-    if not pool.sub_account_id:
-        raise ValueError(
-            f"Pool {pool.id} has no Nomba sub-account."
-        )
 
     # --------------------------------------------------
     # Step 1
@@ -63,12 +69,14 @@ def trigger_payout(
 
     # --------------------------------------------------
     # Step 2
-    # Nomba transfer
+    # Nomba transfer -- scoped internally to the single
+    # shared sub-account by transfer_service itself
     # --------------------------------------------------
 
     transfer_result = (
         transfer_service.send_to_supplier(
-            sub_account_id=pool.sub_account_id,
+            pool_id=str(pool.id),
+            pool_title=pool.title,
             amount=float(
                 pool.current_locked_amount
             ),
@@ -80,10 +88,6 @@ def trigger_payout(
             ),
             supplier_name=(
                 pool.supplier_name
-            ),
-            narration=(
-                f"OjaBulk Pool "
-                f"{pool.title}"
             ),
         )
     )

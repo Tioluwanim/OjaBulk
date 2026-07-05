@@ -9,6 +9,17 @@ class NombaTransferService:
     Nomba Transfers API.
 
     Used for supplier payouts when a pool reaches target.
+
+    CORRECTED per the Nomba hackathon organizer's confirmed API reference:
+    the transfer endpoint must be scoped to the sub-account that actually
+    holds the pooled funds — POST /v2/transfers/bank/{subAccountId} — not
+    the parent-account endpoint (POST /v2/transfers/bank with no path
+    param). Since every trader virtual account is created under
+    /accounts/virtual/{subAccountId}, the money genuinely lands in the
+    sub-account, not the parent. A payout call against the parent
+    endpoint would either fail (insufficient parent balance) or, worse,
+    silently draw from the wrong pool of money if the parent happens to
+    have unrelated funds.
     """
 
     BASE_URL_V2 = os.getenv(
@@ -21,9 +32,12 @@ class NombaTransferService:
         "https://sandbox.nomba.com/v1"
     ).rstrip("/")
 
-    TRANSFERS_URL = (
-        f"{BASE_URL_V2}/transfers/bank"
-    )
+    def _transfer_url(self) -> str:
+        """
+        Sub-account-scoped transfer URL, per organizer spec:
+        POST /v2/transfers/bank/{subAccountId}
+        """
+        return f"{self.BASE_URL_V2}/transfers/bank/{nomba_client.subaccount_id}"
 
     def send_to_supplier(
         self,
@@ -35,7 +49,7 @@ class NombaTransferService:
         supplier_name: str,
     ) -> dict:
         """
-        Send payout to supplier.
+        Send payout to supplier from the sub-account holding pooled funds.
         """
 
         if amount <= 0:
@@ -59,9 +73,11 @@ class NombaTransferService:
             )[:100],
         }
 
+        url = self._transfer_url()
+
         try:
             response = requests.post(
-                self.TRANSFERS_URL,
+                url,
                 headers=nomba_client.get_headers(),
                 json=payload,
                 timeout=30,
@@ -70,15 +86,6 @@ class NombaTransferService:
             raise ConnectionError(
                 f"Transfer request failed: {e}"
             )
-
-        print(
-            f"[DEBUG] transfer status: "
-            f"{response.status_code}"
-        )
-        print(
-            f"[DEBUG] transfer body: "
-            f"{response.text}"
-        )
 
         try:
             body = response.json()
@@ -118,26 +125,20 @@ class NombaTransferService:
     def requery_transfer(
         self,
         transaction_ref: str,
-        sub_account_id: str | None = None,
     ) -> dict:
         """
-        Requery transfer status.
+        Requery transfer status, scoped to our sub-account.
 
-        Verify this endpoint against your
-        Nomba dashboard documentation.
+        Per organizer spec: GET /v1/transactions/accounts/{subAccountId}
+        "If you use both parent and sub account to carry out transfers,
+        use this" (per Nomba docs) — since OjaBulk transfers exclusively
+        from the sub-account, this is always scoped to subaccount_id.
         """
-
-        if sub_account_id:
-            url = (
-                f"{self.BASE_URL_V1}"
-                f"/transactions/accounts/"
-                f"{sub_account_id}/single"
-            )
-        else:
-            url = (
-                f"{self.BASE_URL_V1}"
-                f"/transactions/accounts/single"
-            )
+        url = (
+            f"{self.BASE_URL_V1}"
+            f"/transactions/accounts/"
+            f"{nomba_client.subaccount_id}/single"
+        )
 
         try:
             response = requests.get(
@@ -152,15 +153,6 @@ class NombaTransferService:
             raise ConnectionError(
                 f"Transfer requery failed: {e}"
             )
-
-        print(
-            f"[DEBUG] requery status: "
-            f"{response.status_code}"
-        )
-        print(
-            f"[DEBUG] requery body: "
-            f"{response.text}"
-        )
 
         if response.status_code != 200:
             raise PermissionError(
@@ -183,9 +175,9 @@ class NombaTransferService:
 
     def get_banks(self) -> list:
         """
-        Fetch supported banks.
-
-        Confirm endpoint path from docs.
+        Fetch supported banks. Per organizer spec:
+        GET /v1/transfers/banks (not sub-account-scoped — this is a
+        static reference list, not account-specific data).
         """
 
         url = (
@@ -204,11 +196,6 @@ class NombaTransferService:
                 f"Bank list request failed: {e}"
             )
 
-        print(
-            f"[DEBUG] banks status: "
-            f"{response.status_code}"
-        )
-
         if response.status_code != 200:
             raise PermissionError(
                 f"Bank list failed "
@@ -222,6 +209,45 @@ class NombaTransferService:
             "data",
             []
         )
+
+    def lookup_account(
+        self,
+        account_number: str,
+        bank_code: str,
+    ) -> dict:
+        """
+        Verify a recipient bank account before transferring — confirmed
+        endpoint per organizer spec: POST /v1/transfers/bank/lookup.
+        Always call this before adding a supplier to a pool, so the
+        admin can confirm the account name matches before real money
+        moves.
+        """
+        url = f"{self.BASE_URL_V1}/transfers/bank/lookup"
+
+        try:
+            response = requests.post(
+                url,
+                headers=nomba_client.get_headers(),
+                json={
+                    "accountNumber": account_number,
+                    "bankCode": bank_code,
+                },
+                timeout=10,
+            )
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Bank lookup failed: {e}")
+
+        if response.status_code != 200:
+            raise PermissionError(
+                f"Bank lookup failed [{response.status_code}]: {response.text}"
+            )
+
+        body = response.json()
+        data = body.get("data", {})
+        return {
+            "account_number": data.get("accountNumber", account_number),
+            "account_name": data.get("accountName", ""),
+        }
 
 
 transfer_service = (

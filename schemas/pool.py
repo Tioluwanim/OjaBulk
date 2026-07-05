@@ -20,8 +20,17 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class PoolCreate(BaseModel):
-    """What an admin may submit to POST /pools — request input, no from_attributes needed"""
+    """
+    What a Head of Traders (or admin) may submit to POST /pools —
+    request input, no from_attributes needed.
+
+    market_name is REQUIRED. A Head of Traders can only submit a
+    market_name matching their own Identity.market_name — enforced in
+    routers/pools.py, not here, since this schema has no knowledge of
+    who is making the request.
+    """
     title: str = Field(..., min_length=3, max_length=200)
+    market_name: str = Field(..., min_length=2, max_length=200)
     target_amount: float = Field(..., gt=0)
     supplier_name: str = Field(..., min_length=2, max_length=200)
     supplier_account_number: str = Field(..., min_length=10, max_length=10)
@@ -35,7 +44,7 @@ class PoolCreate(BaseModel):
             raise ValueError("supplier_account_number must be a 10-digit NUBAN")
         return v
 
-    @field_validator("title", "supplier_name")
+    @field_validator("title", "supplier_name", "market_name")
     @classmethod
     def strip_text(cls, v: str) -> str:
         return v.strip()
@@ -64,6 +73,7 @@ class PoolResponse(BaseModel):
 
     id: str
     title: str
+    market_name: str | None = None
     target_amount: float
     current_locked_amount: float
     progress_pct: float
@@ -74,6 +84,7 @@ class PoolResponse(BaseModel):
     deadline: datetime
     created_at: datetime | None = None
     fulfilled_at: datetime | None = None
+    wholesaler_confirmed_at: datetime | None = None
 
 
 class PoolDetailResponse(PoolResponse):
@@ -93,3 +104,19 @@ class PoolJoinResponse(BaseModel):
     pool_title: str
     target: float
     progress: float
+
+
+class WholesalerConfirmResponse(BaseModel):
+    """
+    Returned by POST /pools/{id}/confirm-order — the wholesaler
+    acknowledging they have received the payout and will fulfil the
+    order. Kept intentionally separate from PoolResponse rather than
+    reusing it, since this endpoint's whole purpose is a single new
+    piece of state (wholesaler_confirmed_at), not the full pool shape.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    pool_id: str
+    pool_title: str
+    wholesaler_confirmed_at: datetime
+    message: str
