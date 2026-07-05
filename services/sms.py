@@ -1,67 +1,145 @@
 """
 services/sms.py
 
-SMS notifications via Termii (Nigerian-focused) with Resend fallback.
+SMS notifications via Robase.
 
-Four SMS types only:
+Supported messages:
 1. Virtual account created
-2. Payment received (with split breakdown)
-3. Pool fulfilled (supplier paid)
-4. Pool refunded (deadline missed)
+2. Payment received
+3. Pool fulfilled
+4. Pool refunded
+5. Login OTP
+
+IMPORTANT:
+
+OTP generation and verification are handled internally by
+services/auth.py and the OTPSession table.
+
+Robase is used only as the SMS transport layer.
 """
 
-import requests
 import os
+
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class SMSService:
+    BASE_URL = "https://api.robase.dev/v1"
 
     def __init__(self):
-        self.termii_api_key = os.getenv("TERMII_API_KEY", "")
-        self.termii_url = "https://api.ng.termii.com/api/sms/send"
-        self.sender_id = os.getenv("SMS_SENDER_ID", "OjaBulk")
+        self.api_key = os.getenv("ROBASE_API_KEY", "").strip()
 
-    def _send(self, phone: str, message: str) -> bool:
+    def _headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _normalize_phone(self, phone: str) -> str:
         """
-        Sends an SMS via Termii.
-        Returns True on success, False on failure (non-blocking — SMS failure
-        should never crash the reconciliation engine).
+        Converts Nigerian numbers to E.164 format.
+
+        Examples:
+            08012345678     -> +2348012345678
+            2348012345678   -> +2348012345678
+            +2348012345678  -> +2348012345678
         """
-        if not self.termii_api_key:
-            print(f"[SMS] No API key — would send to {phone}: {message}")
+        phone = (
+            phone.strip()
+            .replace(" ", "")
+            .replace("-", "")
+        )
+
+        if phone.startswith("+234"):
+            return phone
+
+        if phone.startswith("234"):
+            return f"+{phone}"
+
+        if phone.startswith("0"):
+            return f"+234{phone[1:]}"
+
+        return f"+234{phone}"
+
+    def _send_sms(
+        self,
+        phone: str,
+        message: str,
+    ) -> bool:
+        """
+        Sends SMS via Robase.
+
+        Returns:
+            True if accepted by Robase
+            False otherwise
+        """
+        if not self.api_key:
+            print("[SMS] Missing ROBASE_API_KEY")
             return False
 
-        # Normalize Nigerian phone number to international format
         phone = self._normalize_phone(phone)
 
         payload = {
-            "to":      phone,
-            "from":    self.sender_id,
-            "sms":     message,
-            "type":    "plain",
-            "channel": "generic",
-            "api_key": self.termii_api_key,
+            "phone_number": phone,
+            "message": message,
+            "metadata": {
+                "app": "OjaBulk"
+            }
         }
 
         try:
             response = requests.post(
-                self.termii_url,
+                f"{self.BASE_URL}/sms/send",
+                headers=self._headers(),
                 json=payload,
-                timeout=10,
+                timeout=15,
             )
-            return response.status_code == 200
-        except Exception as e:
-            print(f"[SMS] Send failed for {phone}: {e}")
+
+            if response.status_code in (200, 201):
+                return True
+
+            print(
+                f"[SMS] Send failed for {phone} "
+                f"[{response.status_code}]: "
+                f"{response.text[:500]}"
+            )
+
             return False
 
-    def _normalize_phone(self, phone: str) -> str:
-        """Converts 08012345678 → 2348012345678"""
-        phone = phone.strip().replace(" ", "").replace("-", "")
-        if phone.startswith("0"):
-            phone = "234" + phone[1:]
-        if not phone.startswith("234"):
-            phone = "234" + phone
-        return phone
+        except Exception as e:
+            print(f"[SMS] Exception for {phone}: {e}")
+            return False
+
+    # ==========================================================
+    # OTP
+    # ==========================================================
+
+    def send_otp_code(
+        self,
+        phone: str,
+        code: str,
+    ) -> bool:
+        """
+        Sends an OTP generated internally by OjaBulk.
+
+        NOTE:
+        auth.py generates and verifies OTPs.
+        Robase only delivers the SMS.
+        """
+        message = (
+            f"OjaBulk login code: {code}\n"
+            f"Valid for 10 minutes.\n"
+            f"Do not share this code with anyone."
+        )
+
+        return self._send_sms(phone, message)
+
+    # ==========================================================
+    # ACCOUNT CREATED
+    # ==========================================================
 
     def send_account_created(
         self,
@@ -70,12 +148,19 @@ class SMSService:
         account_number: str,
         bank_name: str,
     ) -> bool:
+        first_name = trader_name.split()[0]
+
         message = (
-            f"Welcome to OjaBulk, {trader_name.split()[0]}!\n"
+            f"Welcome to OjaBulk, {first_name}!\n"
             f"Your account: {account_number} — {bank_name}\n"
-            f"Send money here to contribute to your pool. Any bank, anytime."
+            f"Send money here to contribute to your pool."
         )
-        return self._send(phone, message)
+
+        return self._send_sms(phone, message)
+
+    # ==========================================================
+    # PAYMENT RECEIVED
+    # ==========================================================
 
     def send_payment_received(
         self,
@@ -87,26 +172,34 @@ class SMSService:
         pool_name: str | None,
         pool_progress_pct: float | None,
     ) -> bool:
-        name = trader_name.split()[0]
+        first_name = trader_name.split()[0]
 
         if pool_cut > 0 and pool_name:
             progress_text = (
                 f" Pool: {pool_progress_pct:.0f}% complete."
-                if pool_progress_pct is not None else ""
+                if pool_progress_pct is not None
+                else ""
             )
+
             message = (
-                f"OjaBulk: \u20a6{total_amount:,.0f} received.\n"
-                f"\u20a6{pool_cut:,.0f} locked in {pool_name}.\n"
-                f"\u20a6{spendable_cut:,.0f} added to spendable.{progress_text}"
+                f"OjaBulk: ₦{total_amount:,.0f} received.\n"
+                f"₦{pool_cut:,.0f} locked in {pool_name}.\n"
+                f"₦{spendable_cut:,.0f} added to spendable."
+                f"{progress_text}"
             )
         else:
             message = (
-                f"OjaBulk: \u20a6{total_amount:,.0f} received, {name}.\n"
+                f"OjaBulk: ₦{total_amount:,.0f} received, "
+                f"{first_name}.\n"
                 f"Added to your spendable balance.\n"
                 f"Join a pool to start contributing toward wholesale."
             )
 
-        return self._send(phone, message)
+        return self._send_sms(phone, message)
+
+    # ==========================================================
+    # POOL FULFILLED
+    # ==========================================================
 
     def send_pool_fulfilled(
         self,
@@ -119,10 +212,15 @@ class SMSService:
         message = (
             f"OjaBulk: {pool_title} reached its target!\n"
             f"Payment sent to {supplier_name}.\n"
-            f"Your contribution: \u20a6{contribution_amount:,.0f} confirmed. "
+            f"Your contribution: ₦{contribution_amount:,.0f} confirmed.\n"
             f"Una pool don full!"
         )
-        return self._send(phone, message)
+
+        return self._send_sms(phone, message)
+
+    # ==========================================================
+    # POOL REFUNDED
+    # ==========================================================
 
     def send_pool_refunded(
         self,
@@ -133,27 +231,30 @@ class SMSService:
     ) -> bool:
         message = (
             f"OjaBulk: {pool_title} did not reach its target.\n"
-            f"\u20a6{refund_amount:,.0f} returned to your spendable balance.\n"
+            f"₦{refund_amount:,.0f} returned to your spendable balance.\n"
             f"No wahala — your money is safe."
         )
-        return self._send(phone, message)
 
-    def send_otp_code(
-        self,
-        phone: str,
-        code: str,
-    ) -> bool:
-        """
-        Sends a login OTP code. Used by services/auth.py for all three
-        login roles (trader, head_of_traders, wholesaler) — the OTP
-        flow itself is identical regardless of role.
-        """
-        message = (
-            f"OjaBulk login code: {code}\n"
-            f"Valid for 10 minutes. Do not share this code with anyone."
-        )
-        return self._send(phone, message)
+        return self._send_sms(phone, message)
 
 
-# Single shared instance
+# Shared singleton instance
 sms_service = SMSService()
+
+
+if __name__ == "__main__":
+    print("Testing Robase SMS Service...")
+
+    test_phone = os.getenv("SMS_TEST_PHONE", "")
+
+    if not test_phone:
+        print("Set SMS_TEST_PHONE in your .env file.")
+    else:
+        print(f"Sending OTP to {test_phone}...")
+
+        result = sms_service.send_otp_code(
+            phone=test_phone,
+            code="123456",
+        )
+
+        print(f"Success: {result}")
