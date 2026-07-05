@@ -5,10 +5,13 @@ import { Solution } from "@/components/landing/Solution";
 import { HowItWorks } from "@/components/landing/HowItWorks";
 import { DemoCTA } from "@/components/landing/DemoCTA";
 import { Footer } from "@/components/landing/Footer";
+import { LedgerTape } from "@/components/landing/LedgerTape";
 
 export default function Home() {
   return (
-    <main>
+    <main className="relative">
+      <div className="grain-overlay" />
+      <LedgerTape />
       <Navbar />
       <Hero />
       <Problem />

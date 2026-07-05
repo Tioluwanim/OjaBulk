@@ -51,6 +51,12 @@ export function DemoCTA() {
               >
                 View Admin Dashboard
               </Link>
+              <Link
+                href="/demo/ussd"
+                className="inline-flex items-center justify-center gap-2 rounded-full border-2 border-gold-400/40 px-7 py-3.5 font-display font-semibold text-gold-400 transition-all duration-200 hover:border-gold-400 active:scale-[0.98]"
+              >
+                Try USSD Demo
+              </Link>
             </div>
           </motion.div>
 

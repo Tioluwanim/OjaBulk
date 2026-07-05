@@ -1,6 +1,7 @@
 ﻿"use client";
 
-import { motion } from "framer-motion";
+import { motion, useScroll, useTransform } from "framer-motion";
+import { useRef } from "react";
 import { Send, Building2, PiggyBank, Store } from "lucide-react";
 
 const flowSteps = [
@@ -31,6 +32,13 @@ const flowSteps = [
 ];
 
 export function HowItWorks() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: containerRef,
+    offset: ["start 70%", "end 60%"],
+  });
+  const lineScale = useTransform(scrollYProgress, [0, 1], [0, 1]);
+
   return (
     <section id="how-it-works" className="bg-cream-dark py-24 md:py-32">
       <div className="container-oja">
@@ -41,7 +49,7 @@ export function HowItWorks() {
           transition={{ duration: 0.6 }}
           className="mx-auto max-w-3xl text-center"
         >
-          <span className="text-sm font-semibold uppercase tracking-wider text-gold-600">
+          <span className="font-mono text-xs font-semibold uppercase tracking-widest text-gold-600">
             How It Works
           </span>
           <h2 className="mt-4 font-display text-display-md font-bold text-charcoal">
@@ -53,9 +61,13 @@ export function HowItWorks() {
           </p>
         </motion.div>
 
-        <div className="relative mt-20">
-          {/* Connecting line — desktop only */}
-          <div className="absolute left-0 right-0 top-8 hidden h-0.5 bg-gradient-to-r from-transparent via-gold-300 to-transparent lg:block" />
+        <div ref={containerRef} className="relative mt-20">
+          {/* Scroll-drawn connecting line — desktop only */}
+          <div className="absolute left-0 right-0 top-8 hidden h-0.5 bg-charcoal/10 lg:block" />
+          <motion.div
+            style={{ scaleX: lineScale }}
+            className="absolute left-0 right-0 top-8 hidden h-0.5 origin-left bg-gold-400 lg:block"
+          />
 
           <div className="grid grid-cols-1 gap-10 md:grid-cols-2 lg:grid-cols-4">
             {flowSteps.map((step, i) => (
@@ -70,7 +82,7 @@ export function HowItWorks() {
                 <div className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full border-4 border-cream-dark bg-gold-500 shadow-gold">
                   <step.icon className="h-7 w-7 text-cream" />
                 </div>
-                <span className="mt-4 font-display text-xs font-bold uppercase tracking-wider text-gold-600">
+                <span className="mt-4 font-mono text-xs font-bold uppercase tracking-wider text-gold-600">
                   Step {i + 1}
                 </span>
                 <h3 className="mt-2 font-display text-lg font-bold text-charcoal">
@@ -84,7 +96,6 @@ export function HowItWorks() {
           </div>
         </div>
 
-        {/* Architecture footnote */}
         <motion.div
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}

@@ -35,7 +35,7 @@ const colorMap: Record<string, { bg: string; icon: string }> = {
 
 export function Solution() {
   return (
-    <section className="bg-cream py-24 md:py-32">
+    <section id="solution" className="bg-cream py-24 md:py-32">
       <div className="container-oja">
         <motion.div
           initial={{ opacity: 0, y: 24 }}
