@@ -58,7 +58,6 @@ class SMSService:
     def __init__(self):
         self.api_key = settings.AFRICAS_TALKING_API_KEY
         self.username = "radet"
-        self.sender_id = getattr(settings, "SMS_SENDER_ID", "") or ""
 
         # Africa's Talking routes "sandbox" username to a separate
         # simulated environment -- anything else is treated as a real
@@ -126,9 +125,6 @@ class SMSService:
             "to": phone,
             "message": message,
         }
-        if self.sender_id:
-            data["from"] = self.sender_id
-
         try:
             response = requests.post(
                 self.base_url,
