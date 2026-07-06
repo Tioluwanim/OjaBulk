@@ -31,8 +31,19 @@ class Settings:
     )
 
     # ── SMS ──────────────────────────────────────────────────────────────
-    TERMII_API_KEY = os.getenv("TERMII_API_KEY", "")
+    # SMS_PROVIDER picks which provider services/sms.py actually calls.
+    # "arkesel" is the primary choice (see services/sms.py's module
+    # docstring for why). "termii" is kept wired as a same-day fallback —
+    # if Arkesel has any issue (sender-ID approval delay, unexpected
+    # payload quirk, rate limiting) before the demo, set
+    # SMS_PROVIDER=termii and everything works again with zero code
+    # changes, since Termii credentials were never removed.
+    SMS_PROVIDER   = os.getenv("SMS_PROVIDER", "arkesel").strip().lower()
     SMS_SENDER_ID  = os.getenv("SMS_SENDER_ID", "OjaBulk")
+
+    ARKESEL_API_KEY = os.getenv("ARKESEL_API_KEY", "")
+
+    TERMII_API_KEY = os.getenv("TERMII_API_KEY", "")
 
     # ── USSD ─────────────────────────────────────────────────────────────
     AFRICAS_TALKING_API_KEY   = os.getenv("AFRICAS_TALKING_API_KEY", "")
