@@ -57,7 +57,7 @@ class SMSService:
 
     def __init__(self):
         self.api_key = settings.AFRICAS_TALKING_API_KEY
-        self.username = settings.AFRICAS_TALKING_USERNAME
+        self.username = "radet"
         self.sender_id = getattr(settings, "SMS_SENDER_ID", "") or ""
 
         # Africa's Talking routes "sandbox" username to a separate
