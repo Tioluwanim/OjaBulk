@@ -45,7 +45,7 @@ from core.config import settings
 class SMSService:
 
     ARKESEL_URL = "https://sms.arkesel.com/api/v2/sms/send"
-    TERMII_URL = "https://api.ng.termii.com/api/sms/send"
+    TERMII_URL = "https://v4.api.termii.com/api/sms/send"
 
     def __init__(self):
         self.provider = settings.SMS_PROVIDER
