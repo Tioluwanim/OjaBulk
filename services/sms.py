@@ -36,6 +36,8 @@ class SMSService:
         return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "OjaBulk/1.0",
         }
 
     def _normalize_phone(self, phone: str) -> str:
@@ -65,9 +67,9 @@ class SMSService:
         return f"+234{phone}"
 
     def _send_sms(
-        self,
-        phone: str,
-        message: str,
+            self,
+            phone: str,
+            message: str,
     ) -> bool:
         """
         Sends SMS via Robase.
@@ -90,23 +92,50 @@ class SMSService:
             }
         }
 
+        url = f"{self.BASE_URL}/sms/send"
+
         try:
+            # Debug info
+            print("\n" + "=" * 60)
+            print("[SMS] Sending SMS")
+            print(f"URL: {url}")
+            print(f"Phone: {phone}")
+            print(f"API Key Loaded: {'YES' if self.api_key else 'NO'}")
+            print(f"API Key Prefix: {self.api_key[:10]}...")
+            print(f"Payload: {payload}")
+            print("=" * 60)
+
             response = requests.post(
-                f"{self.BASE_URL}/sms/send",
+                url,
                 headers=self._headers(),
                 json=payload,
                 timeout=15,
             )
 
+            print("\n" + "=" * 60)
+            print("[SMS] Response")
+            print(f"Status Code: {response.status_code}")
+            print(f"Response Headers: {dict(response.headers)}")
+            print(f"Response Body: {response.text[:2000]}")
+            print("=" * 60)
+
             if response.status_code in (200, 201):
+                print(f"[SMS] Successfully sent to {phone}")
                 return True
 
             print(
                 f"[SMS] Send failed for {phone} "
-                f"[{response.status_code}]: "
-                f"{response.text[:500]}"
+                f"[{response.status_code}]"
             )
 
+            return False
+
+        except requests.exceptions.Timeout:
+            print(f"[SMS] Timeout while sending to {phone}")
+            return False
+
+        except requests.exceptions.ConnectionError as e:
+            print(f"[SMS] Connection error for {phone}: {e}")
             return False
 
         except Exception as e:
