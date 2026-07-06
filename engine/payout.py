@@ -64,6 +64,7 @@ def trigger_payout(
     pool.fulfilled_at = datetime.now(
         timezone.utc
     )
+    pool.fulfilled_amount = float(pool.current_locked_amount)
 
     db.flush()
 
@@ -150,6 +151,8 @@ def trigger_payout(
                 ),
             )
         )
+
+    pool.nomba_transfer_ref = transfer_ref or None
 
     db.commit()
 

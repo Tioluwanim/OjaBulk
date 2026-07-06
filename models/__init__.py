@@ -27,6 +27,14 @@ from models.payment import Payment
 from models.ledger_entry import LedgerEntry, EntryType
 from models.identity import Identity, IdentityRole
 from models.otp_session import OTPSession
+from models.esusu import (
+    EsusuCycle,
+    EsusuStatus,
+    EsusuMember,
+    EsusuRound,
+    EsusuRoundStatus,
+    EsusuContribution,
+)
 
 __all__ = [
     "Trader",
@@ -40,4 +48,10 @@ __all__ = [
     "Identity",
     "IdentityRole",
     "OTPSession",
+    "EsusuCycle",
+    "EsusuStatus",
+    "EsusuMember",
+    "EsusuRound",
+    "EsusuRoundStatus",
+    "EsusuContribution",
 ]

@@ -23,7 +23,7 @@ from background.pool_expiry_checker import create_scheduler
 import models  # noqa: F401
 
 # Import routers
-from routers import traders, pools, webhooks, reports, ussd, auth
+from routers import traders, pools, webhooks, reports, ussd, auth, esusu
 
 
 # ── Lifespan (startup + shutdown) ─────────────────────────────────────────
@@ -87,6 +87,7 @@ app.include_router(pools.router,    prefix="/pools",            tags=["Pools"])
 app.include_router(webhooks.router, prefix="/webhooks",         tags=["Webhooks"])
 app.include_router(reports.router,  prefix="/reports",          tags=["Reports"])
 app.include_router(ussd.router,     prefix="/ussd",             tags=["USSD"])
+app.include_router(esusu.router,    prefix="/esusu",            tags=["Ajo/Esusu"])
 
 
 # ── Health + ping endpoints ────────────────────────────────────────────────

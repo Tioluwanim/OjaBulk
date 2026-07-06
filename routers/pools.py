@@ -199,7 +199,12 @@ def get_pool(pool_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{pool_id}/join", response_model=PoolJoinResponse)
-def join_pool(pool_id: str, payload: PoolJoinRequest, db: Session = Depends(get_db)):
+def join_pool(
+    pool_id: str,
+    payload: PoolJoinRequest,
+    db: Session = Depends(get_db),
+    identity: Identity = Depends(require_role(IdentityRole.TRADER)),
+):
     """
     POST /pools/{id}/join
     Trader opts into a pool as their active contribution target.
@@ -227,6 +232,27 @@ def join_pool(pool_id: str, payload: PoolJoinRequest, db: Session = Depends(get_
     trader = db.query(Trader).filter(Trader.id == trader_uuid).first()
     if not trader:
         raise HTTPException(status_code=404, detail="Trader not found")
+
+    if identity.linked_trader_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail="This trader identity is not linked to a trader record."
+        )
+
+    if identity.linked_trader_id != trader_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only join pools for your own trader account."
+        )
+
+    if pool.market_name and trader.market_name != pool.market_name:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"This pool is for {pool.market_name}, but your trader "
+                f"record belongs to {trader.market_name}."
+            )
+        )
 
     existing = db.query(PoolContribution).filter(
         PoolContribution.trader_id == trader_uuid,

@@ -99,15 +99,13 @@ def reconcile(
 
     active_contribution = (
         db.query(PoolContribution)
-        .filter(
-            PoolContribution.trader_id == trader.id,
-            PoolContribution.status
-            == ContributionStatus.LOCKED,
-        )
         .join(Pool)
         .filter(
-            Pool.status == PoolStatus.OPEN
+            PoolContribution.trader_id == trader.id,
+            PoolContribution.status == ContributionStatus.LOCKED,
+            Pool.status == PoolStatus.OPEN,
         )
+        .with_for_update()
         .first()
     )
 
@@ -126,6 +124,8 @@ def reconcile(
     pool_id = None
 
     if active_pool:
+
+        db.refresh(active_pool)
 
         remaining_gap = max(
             Decimal("0"),
@@ -337,6 +337,9 @@ def reconcile(
                 )
 
                 pool_fulfilled = True
+                active_pool = db.query(Pool).filter(
+                    Pool.id == active_pool.id
+                ).first()
 
             except Exception as e:
 

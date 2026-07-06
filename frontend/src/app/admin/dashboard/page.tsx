@@ -8,21 +8,23 @@ import { StatCard } from "@/components/admin/StatCard";
 import { PoolProgressChart } from "@/components/admin/PoolProgressChart";
 import { PoolStatusDonut } from "@/components/admin/PoolStatusDonut";
 import { Spinner } from "@/components/ui/Spinner";
-import { getStats } from "@/lib/api/reports";
+import { getStats, getRecentPayments } from "@/lib/api/reports";
 import { listPools } from "@/lib/api/pools";
 import { formatNaira } from "@/lib/format";
-import type { StatsResponse, PoolResponse } from "@/lib/types";
+import type { StatsResponse, PoolResponse, RecentPaymentItem } from "@/lib/types";
 
 function DashboardContent() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [pools, setPools] = useState<PoolResponse[]>([]);
+  const [recentPayments, setRecentPayments] = useState<RecentPaymentItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getStats(), listPools()])
-      .then(([statsData, poolsData]) => {
+    Promise.all([getStats(), listPools(), getRecentPayments()])
+      .then(([statsData, poolsData, paymentsData]) => {
         setStats(statsData);
         setPools(poolsData);
+        setRecentPayments(paymentsData.items);
       })
       .finally(() => setIsLoading(false));
   }, []);
@@ -74,6 +76,42 @@ function DashboardContent() {
           <div className="mt-4">
             <PoolStatusDonut pools={pools} />
           </div>
+        </div>
+      </div>
+
+      <div className="mt-8 card-surface p-6">
+        <h2 className="font-display text-lg font-bold text-charcoal">
+          Recent Payments
+        </h2>
+        <p className="text-sm text-charcoal-soft">
+          Latest inbound transfers across trader virtual accounts.
+        </p>
+        <div className="mt-4 divide-y divide-surface-border overflow-hidden rounded-xl2 border border-surface-border">
+          {recentPayments.length === 0 ? (
+            <p className="p-6 text-sm text-charcoal-soft">
+              No payments recorded yet.
+            </p>
+          ) : (
+            recentPayments.map((payment) => (
+              <div key={payment.id} className="flex items-center justify-between p-4">
+                <div>
+                  <p className="text-sm font-medium text-charcoal">{payment.trader_name}</p>
+                  <p className="text-xs text-charcoal-soft">
+                    {payment.trader_phone}
+                    {payment.pool_title ? ` · ${payment.pool_title}` : ""}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="font-display text-sm font-bold text-charcoal">
+                    {formatNaira(payment.amount_received)}
+                  </p>
+                  <p className="text-xs text-charcoal-soft">
+                    {formatNaira(payment.pool_portion)} locked · {formatNaira(payment.spendable_portion)} spendable
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

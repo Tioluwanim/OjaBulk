@@ -42,3 +42,36 @@ class StatsResponse(BaseModel):
     fulfilled_pools: int
     total_locked: float
     total_fulfilled_amount: float
+
+
+class RecentPaymentItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    trader_id: str
+    trader_name: str
+    trader_phone: str
+    amount_received: float
+    spendable_portion: float
+    pool_portion: float
+    pool_id: str | None = None
+    pool_title: str | None = None
+    nomba_transaction_ref: str
+    received_at: str | None = None
+
+
+class RecentPaymentsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    items: list[RecentPaymentItem]
+
+
+class AnalyticsSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    open_pools: int
+    fulfilled_pools: int
+    refunded_pools: int
+    total_locked_open_pools: float
+    average_open_pool_progress_pct: float
+    near_target_pools: int

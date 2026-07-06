@@ -37,6 +37,7 @@ def refund_pool(db: Session, pool: Pool) -> dict:
     """
     # ── Step 1: Flip status to REFUNDED immediately ────────────────────────
     pool.status = PoolStatus.REFUNDED
+    pool.refunded_at = datetime.now(timezone.utc)
     db.flush()
 
     # ── Step 2: Return every locked contribution to spendable balance ──────

@@ -129,6 +129,126 @@ export interface StatsResponse {
   total_fulfilled_amount: number;
 }
 
+export interface RecentPaymentItem {
+  id: string;
+  trader_id: string;
+  trader_name: string;
+  trader_phone: string;
+  amount_received: number;
+  spendable_portion: number;
+  pool_portion: number;
+  pool_id: string | null;
+  pool_title: string | null;
+  nomba_transaction_ref: string;
+  received_at: string | null;
+}
+
+export interface RecentPaymentsResponse {
+  items: RecentPaymentItem[];
+}
+
+// ============================================================
+// Esusu
+// ============================================================
+export type EsusuStatus = "open" | "active" | "completed" | "cancelled";
+export type EsusuRoundStatus = "open" | "paid";
+
+export interface EsusuCycleCreatePayload {
+  title: string;
+  market_name: string;
+  contribution_amount: number;
+  total_members: number;
+  frequency_days: number;
+  description?: string | null;
+}
+
+export interface EsusuMemberResponse {
+  id: string;
+  trader_id: string;
+  trader_name: string;
+  trader_phone: string;
+  payout_position: number;
+  joined_at: string | null;
+  last_contributed_round: number | null;
+  last_received_round: number | null;
+}
+
+export interface EsusuContributionResponse {
+  id: string;
+  round_id: string;
+  trader_id: string;
+  trader_name: string;
+  amount: number;
+  contributed_at: string | null;
+}
+
+export interface EsusuRoundResponse {
+  id: string;
+  round_number: number;
+  beneficiary_member_id: string;
+  beneficiary_trader_name: string;
+  target_amount: number;
+  collected_amount: number;
+  status: EsusuRoundStatus;
+  created_at: string | null;
+  paid_at: string | null;
+  contribution_count: number;
+  progress_pct: number;
+}
+
+export interface EsusuCycleResponse {
+  id: string;
+  title: string;
+  description: string | null;
+  market_name: string | null;
+  contribution_amount: number;
+  total_members: number;
+  frequency_days: number;
+  current_round_number: number;
+  status: EsusuStatus;
+  total_collected: number;
+  created_at: string | null;
+  activated_at: string | null;
+  completed_at: string | null;
+  members: EsusuMemberResponse[];
+  rounds: EsusuRoundResponse[];
+  contributions: EsusuContributionResponse[];
+  progress_pct: number;
+  next_beneficiary_trader_name: string | null;
+}
+
+export interface EsusuListItem {
+  id: string;
+  title: string;
+  market_name: string | null;
+  contribution_amount: number;
+  total_members: number;
+  current_round_number: number;
+  status: EsusuStatus;
+  progress_pct: number;
+  created_at: string | null;
+}
+
+export interface EsusuJoinResponse {
+  id: string;
+  cycle_id: string;
+  trader_id: string;
+  trader_name: string;
+  payout_position: number;
+  status: EsusuStatus;
+  message: string;
+}
+
+export interface EsusuContributionResult {
+  cycle_id: string;
+  round_number: number;
+  amount: number;
+  round_paid: boolean;
+  cycle_completed: boolean;
+  next_round_number: number | null;
+  beneficiary_trader_name: string;
+}
+
 // ============================================================
 // API error shape (FastAPI default)
 // ============================================================

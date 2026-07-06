@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Users, Receipt, LogOut } from "lucide-react";
+import { Home, Users, Receipt, LogOut, CircleDollarSign } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 
 const navItems = [
   { href: "/portal/home", label: "Home", icon: Home },
   { href: "/portal/pools", label: "My Pools", icon: Users },
+  { href: "/portal/esusu", label: "Ajo", icon: CircleDollarSign },
   { href: "/portal/history", label: "History", icon: Receipt },
 ];
 

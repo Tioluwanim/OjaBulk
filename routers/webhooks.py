@@ -15,6 +15,7 @@ from fastapi import APIRouter, Request, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 
 from core.database import SessionLocal
+from models.payment import Payment
 from services.webhooks import webhook_service, WebhookVerificationError
 from engine.reconciliation import (
     reconcile,
@@ -46,7 +47,7 @@ async def receive_nomba_webhook(
     except WebhookVerificationError as e:
         # Log but do not expose details to caller
         print(f"[Webhook] Verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     # Step 3 — Parse body
     try:
@@ -59,10 +60,24 @@ async def receive_nomba_webhook(
         payload = webhook_service.parse_payload(body)
     except ValueError as e:
         print(f"[Webhook] Payload parse error: {e}")
-        # Return 200 anyway — malformed payload should not cause Nomba retries
-        return {"status": "received", "note": "payload parse error — logged"}
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
 
-    # Step 5 — Return 200 IMMEDIATELY
+    # Step 5 — Idempotency check before the background task is queued.
+    db = SessionLocal()
+    try:
+        existing_payment = db.query(Payment).filter(
+            Payment.nomba_transaction_ref == payload["transaction_ref"]
+        ).first()
+    finally:
+        db.close()
+
+    if existing_payment:
+        return {
+            "status": "received",
+            "note": "duplicate transaction ignored",
+        }
+
+    # Step 6 — Return 200 IMMEDIATELY
     # Nomba considers the webhook delivered when it receives 200.
     # Reconciliation runs in background — Nomba never waits for it.
     background_tasks.add_task(
