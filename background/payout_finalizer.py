@@ -24,15 +24,28 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from core.database import SessionLocal
 from models.pool import Pool, PoolStatus
-from engine.payout import finalize_pending_payout
+from engine.payout import finalize_pending_payout, trigger_payout
 
 
 async def run_payout_finalizer():
     """
-    Finds every pool sitting in PAYOUT_PROCESSING and requeries Nomba
-    for each one. Runs every 5 minutes — frequent enough that a demo
-    or a real trader isn't left wondering for long, without hammering
-    Nomba's requery endpoint.
+    Two things run here every 5 minutes:
+
+    1. Requery every pool in PAYOUT_PROCESSING (Nomba accepted the
+       transfer but hadn't confirmed it yet) and finalize once
+       confirmed — the original purpose of this job.
+
+    2. Retry every pool still OPEN whose current_locked_amount has
+       already reached target_amount. This closes a real gap: if
+       trigger_payout()'s call to Nomba's Transfer API raises before
+       completing (network error, expired/invalid credentials, a
+       transient 401/500, etc.), the pool's locked amount was already
+       committed by the caller (reconciliation or
+       contribute-from-spendable) BEFORE trigger_payout was invoked —
+       so the pool is left fully funded but stuck at OPEN, with no
+       automatic retry, since nothing else scans for "OPEN pools that
+       already hit target." Without this, a transient Nomba failure
+       permanently strands a fully-funded pool.
     """
     print(f"[PayoutFinalizer] Running at {datetime.now(timezone.utc).isoformat()}")
     db = SessionLocal()
@@ -45,13 +58,38 @@ async def run_payout_finalizer():
 
         if not pending_pools:
             print("[PayoutFinalizer] No pools pending payout confirmation")
-            return
+        else:
+            for pool in pending_pools:
+                try:
+                    finalize_pending_payout(db, pool)
+                except Exception as e:
+                    print(f"[PayoutFinalizer] Error finalizing pool {pool.id}: {e}")
 
-        for pool in pending_pools:
-            try:
-                finalize_pending_payout(db, pool)
-            except Exception as e:
-                print(f"[PayoutFinalizer] Error finalizing pool {pool.id}: {e}")
+        stuck_pools = (
+            db.query(Pool)
+            .filter(Pool.status == PoolStatus.OPEN)
+            .all()
+        )
+        stuck_pools = [
+            p for p in stuck_pools
+            if float(p.current_locked_amount) >= float(p.target_amount) and float(p.target_amount) > 0
+        ]
+
+        if not stuck_pools:
+            print("[PayoutFinalizer] No fully-funded pools stuck at OPEN")
+        else:
+            for pool in stuck_pools:
+                print(
+                    f"[PayoutFinalizer] Pool {pool.id} ({pool.title}) is fully "
+                    f"funded but still OPEN — retrying payout."
+                )
+                try:
+                    trigger_payout(db=db, pool=pool)
+                except Exception as e:
+                    print(
+                        f"[PayoutFinalizer] Retry failed for stuck pool "
+                        f"{pool.id}: {e}. Will retry again next run."
+                    )
 
     except Exception as e:
         print(f"[PayoutFinalizer] Error: {e}")
