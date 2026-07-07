@@ -32,6 +32,7 @@ from services.auth import require_role, get_current_identity, get_current_identi
 from routers.auth import verify_admin_key
 from schemas.pool import (
     PoolCreate,
+    PoolUpdate,
     PoolResponse,
     PoolDetailResponse,
     PoolJoinRequest,
@@ -447,6 +448,60 @@ def contribute_from_spendable(
             f"₦{amount_to_lock:,.2f} locked in {pool.title}"
             + (" — pool fulfilled!" if pool_fulfilled else "")
         ),
+    )
+
+
+@router.patch("/{pool_id}", response_model=PoolResponse)
+def update_pool(
+    pool_id: str,
+    payload: PoolUpdate,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(verify_admin_key),
+):
+    """
+    PATCH /pools/{id}
+    Admin-only (requires X-Admin-Key header).
+
+    Fixes data-entry mistakes on a pool's supplier details or
+    deadline — e.g. a malformed supplier_bank_code that only surfaced
+    when Nomba's Transfer API rejected it at payout time. Deliberately
+    does NOT allow changing target_amount, current_locked_amount, or
+    status — see schemas/pool.py's PoolUpdate docstring for why.
+
+    Only fields present in the request body are changed; anything
+    omitted is left as-is.
+    """
+    try:
+        pool_uuid = uuid.UUID(pool_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="pool_id must be a valid UUID")
+
+    pool = db.query(Pool).filter(Pool.id == pool_uuid).first()
+    if not pool:
+        raise HTTPException(status_code=404, detail="Pool not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(pool, field, value)
+
+    db.commit()
+    db.refresh(pool)
+
+    return PoolResponse(
+        id=str(pool.id),
+        title=pool.title,
+        market_name=pool.market_name,
+        target_amount=float(pool.target_amount),
+        current_locked_amount=float(pool.current_locked_amount),
+        progress_pct=_progress_pct(pool),
+        supplier_name=pool.supplier_name,
+        supplier_account_number=pool.supplier_account_number,
+        supplier_bank_code=pool.supplier_bank_code,
+        status=pool.status,
+        deadline=pool.deadline,
+        created_at=pool.created_at,
+        fulfilled_at=pool.fulfilled_at,
+        wholesaler_confirmed_at=pool.wholesaler_confirmed_at,
     )
 
 
