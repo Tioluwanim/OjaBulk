@@ -266,14 +266,22 @@ def finalize_pending_payout(db: Session, pool: Pool) -> dict:
         print(f"[PayoutFinalizer] Pool {pool.id} confirmed and finalized.")
         return {"pool_id": str(pool.id), "action": "finalized"}
 
-    if status in ("FAILED", "REVERSED", "DECLINED"):
+    if status in ("FAILED", "REVERSED", "DECLINED", "REFUND"):
         # Do NOT release contributions — the money never actually left
-        # for the supplier. Flag loudly for manual review rather than
-        # guessing at an automatic remediation (retry vs refund) here.
+        # for the supplier (a REFUND status specifically means Nomba
+        # already sent the funds back automatically -- see
+        # https://developer.nomba.com/docs/products/transfers/transfer-to-banks,
+        # which also warns that retrying this MUST use a brand-new
+        # merchantTxRef, never the same one, since the original ref is
+        # now considered terminal/refunded). Flag loudly for manual
+        # review rather than guessing at an automatic remediation
+        # (retry vs refund) here.
         print(
             f"[PayoutFinalizer] ALERT: transfer for pool {pool.id} "
             f"({pool.title}) came back '{status}'. Contributions remain "
-            f"LOCKED. Manual review required — do not treat as paid."
+            f"LOCKED. Manual review required — do not treat as paid. "
+            f"If retrying, you MUST use a new merchantTxRef; the "
+            f"original ({pool.nomba_transfer_ref}) is terminal."
         )
         return {"pool_id": str(pool.id), "action": "failed_needs_review", "status": status}
 
