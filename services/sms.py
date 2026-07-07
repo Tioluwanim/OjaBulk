@@ -55,7 +55,7 @@ from core.config import settings
 
 class SMSService:
 
-    BASE_URL = "https://v3.api.termii.com/api/sms/send"
+    BASE_URL = "https://v4.api.termii.com/api/sms/send"
     DEFAULT_SENDER_ID = "Termii"
 
     def __init__(self):
