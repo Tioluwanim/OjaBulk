@@ -1,6 +1,11 @@
 import { apiClient } from "@/lib/api-client";
 import { getAdminToken } from "@/context/AdminAuthContext";
-import type { PoolResponse, PoolDetailResponse, PoolJoinResponse } from "@/lib/types";
+import type {
+  PoolResponse,
+  PoolDetailResponse,
+  PoolJoinResponse,
+  PoolContributeFromSpendableResponse,
+} from "@/lib/types";
 
 export function listPools() {
   return apiClient.get<PoolResponse[]>("/pools", {
@@ -34,4 +39,11 @@ export function joinPool(poolId: string, traderId: string) {
   return apiClient.post<PoolJoinResponse>(`/pools/${poolId}/join`, {
     trader_id: traderId,
   });
+}
+
+export function contributeFromSpendable(poolId: string, amount: number) {
+  return apiClient.post<PoolContributeFromSpendableResponse>(
+    `/pools/${poolId}/contribute-from-spendable`,
+    { amount }
+  );
 }
