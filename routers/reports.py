@@ -11,6 +11,7 @@ from sqlalchemy import func, case
 
 from core.database import get_db
 from models.payment import Payment
+from models.trader import Trader
 from models.ledger_entry import LedgerEntry, EntryType
 from models.pool import Pool, PoolStatus
 from services.reports import reports_service
