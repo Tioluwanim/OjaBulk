@@ -100,7 +100,23 @@ def request_otp(db: Session, phone: str) -> None:
     db.add(otp_session)
     db.commit()
 
-    sms_service.send_otp_code(phone=phone, code=code)
+    sent = sms_service.send_otp_code(phone=phone, code=code)
+
+    if not sent:
+        # SMS delivery failed (provider down, sender ID not approved,
+        # etc). Log the code itself so it's still retrievable from
+        # Render's logs during a demo/testing -- otherwise a trader is
+        # completely locked out with no way to get their code.
+        # NOTE: this is a deliberate, temporary safety net for
+        # demo/hackathon use. In a real production deployment with
+        # live traders, printing OTPs to logs is a security risk
+        # (anyone with log access can log in as any trader) -- remove
+        # or gate this behind an environment check once SMS delivery
+        # is reliable.
+        print(
+            f"[Auth] SMS send failed for {phone} -- "
+            f"OTP CODE: {code} (expires {expires_at.isoformat()})"
+        )
 
 
 def verify_otp(db: Session, phone: str, code: str) -> dict:
