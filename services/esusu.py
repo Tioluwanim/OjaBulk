@@ -482,12 +482,13 @@ def finalize_pending_esusu_payout(db: Session, round_row: EsusuRound) -> dict:
         print(f"[EsusuPayoutFinalizer] Round {round_row.id} confirmed and finalized.")
         return {"round_id": str(round_row.id), "action": "finalized"}
 
-    if status in ("FAILED", "REVERSED", "DECLINED"):
+    if status in ("FAILED", "REVERSED", "DECLINED", "REFUND"):
         print(
             f"[EsusuPayoutFinalizer] ALERT: transfer for round {round_row.id} "
             f"came back '{status}'. Manual review required — do not treat "
-            f"as paid, and do not auto-retry without checking Nomba's "
-            f"dashboard first."
+            f"as paid. If retrying, you MUST use a new merchantTxRef; the "
+            f"original ({round_row.nomba_transfer_ref}) is terminal per "
+            f"Nomba's docs."
         )
         return {"round_id": str(round_row.id), "action": "failed_needs_review", "status": status}
 
