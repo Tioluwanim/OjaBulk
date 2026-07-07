@@ -55,6 +55,33 @@ class PoolJoinRequest(BaseModel):
     trader_id: str
 
 
+class PoolContributeFromSpendableRequest(BaseModel):
+    """
+    What a client sends to POST /pools/{id}/contribute-from-spendable.
+
+    Real gap this closes: the ONLY way money ever locked into a pool
+    was through engine/reconciliation.py's split logic, which only
+    runs when a brand-new Nomba payment arrives. A trader who already
+    had spendable balance sitting in their OjaBulk wallet (e.g. from
+    an overpayment on a previous pool, or a prior payment with no
+    active pool selected) had no way to move that existing balance
+    into a pool they've since joined -- they'd have to send an
+    entirely new bank transfer instead of just using money they
+    already had on the platform.
+    """
+    amount: float = Field(..., gt=0)
+
+
+class PoolContributeFromSpendableResponse(BaseModel):
+    pool_id: str
+    trader_id: str
+    amount_locked: float
+    new_spendable_balance: float
+    pool_current_locked_amount: float
+    pool_fulfilled: bool
+    message: str
+
+
 class ContributorResponse(BaseModel):
     """Fixed: added from_attributes=True — this schema is built per-item in a list comprehension
     in the pools router; if that construction path ever changes to pass an ORM object
