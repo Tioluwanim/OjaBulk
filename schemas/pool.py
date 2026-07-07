@@ -82,6 +82,13 @@ class PoolContributeFromSpendableResponse(BaseModel):
     message: str
 
 
+class PoolRetryPayoutResponse(BaseModel):
+    pool_id: str
+    status: str
+    pool_fulfilled: bool
+    message: str
+
+
 class ContributorResponse(BaseModel):
     """Fixed: added from_attributes=True — this schema is built per-item in a list comprehension
     in the pools router; if that construction path ever changes to pass an ORM object
