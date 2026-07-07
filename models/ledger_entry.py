@@ -11,6 +11,8 @@ class EntryType(str, enum.Enum):
     POOL_LOCK             = "pool_lock"
     POOL_RELEASE_PAYOUT   = "pool_release_payout"
     POOL_REFUND           = "pool_refund"
+    ESUSU_CONTRIBUTION    = "esusu_contribution"
+    ESUSU_PAYOUT          = "esusu_payout"
 
 
 class LedgerEntry(Base):

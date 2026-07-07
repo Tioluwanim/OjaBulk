@@ -18,6 +18,22 @@ USSD response rules:
 
 class USSDService:
 
+    # Africa's Talking / most carriers cap a single USSD screen around
+    # 160-182 chars depending on network. Leaving the raw, unbounded
+    # pool.title to interpolate directly (previous behavior) meant a
+    # long title could silently truncate the deadline line off the end
+    # of the message, or in some carrier implementations return an
+    # error instead of a truncated screen. Cap it well under the
+    # tightest known limit so the rest of the screen always survives.
+    MAX_TITLE_LENGTH = 40
+
+    def _truncate(self, text: str, max_length: int) -> str:
+        if text is None:
+            return ""
+        if len(text) <= max_length:
+            return text
+        return text[: max_length - 1].rstrip() + "\u2026"
+
     def handle_session(
         self,
         session_id: str,
@@ -100,7 +116,7 @@ class USSDService:
         deadline_str = active_pool.deadline.strftime("%d %b %Y")
 
         return (
-            f"END {active_pool.title}\n"
+            f"END {self._truncate(active_pool.title, self.MAX_TITLE_LENGTH)}\n"
             f"Progress: {progress:.0f}%\n"
             f"\u20a6{active_pool.current_locked_amount:,.0f} of \u20a6{active_pool.target_amount:,.0f}\n"
             f"Deadline: {deadline_str}"

@@ -403,23 +403,61 @@ class CoreFlowTests(unittest.TestCase):
             self.assertEqual(cycle.status, self.models_esusu.EsusuStatus.ACTIVE)
             self.assertEqual(cycle.current_round_number, 1)
 
-            result_1 = self.esusu_service.record_contribution(session, identity_a, cycle)
+            # FIX: record_contribution now requires a real,
+            # webhook-verified Payment row (nomba_transaction_ref) —
+            # it is no longer pure self-attestation. Simulate what
+            # engine/reconciliation.py would have already created from
+            # a genuine Nomba payment_success webhook.
+            def make_payment(trader, ref):
+                payment = self.models_payment.Payment(
+                    trader_id=trader.id,
+                    amount_received=100,
+                    nomba_transaction_ref=ref,
+                    spendable_portion=100,
+                    pool_portion=0,
+                )
+                session.add(payment)
+                session.commit()
+                return ref
+
+            ref_1 = make_payment(trader_a, "esusu-test-ref-1")
+            result_1 = self.esusu_service.record_contribution(session, identity_a, cycle, ref_1)
             cycle = self.esusu_service.get_cycle(session, cycle.id)
             self.assertFalse(result_1["round_paid"])
             self.assertEqual(cycle.current_round_number, 1)
 
-            result_2 = self.esusu_service.record_contribution(session, identity_b, cycle)
+            ref_2 = make_payment(trader_b, "esusu-test-ref-2")
+            result_2 = self.esusu_service.record_contribution(session, identity_b, cycle, ref_2)
             cycle = self.esusu_service.get_cycle(session, cycle.id)
             self.assertTrue(result_2["round_paid"])
             self.assertEqual(cycle.current_round_number, 2)
             self.assertEqual(cycle.status, self.models_esusu.EsusuStatus.ACTIVE)
 
-            result_3 = self.esusu_service.record_contribution(session, identity_a, cycle)
+            # Beneficiary of round 1 (trader_a, payout_position 1)
+            # should have actually been credited real spendable balance
+            # now, not just had a status enum flipped.
+            session.refresh(trader_a)
+            self.assertEqual(float(trader_a.spendable_balance), 200.0)
+
+            # A payment reference can't be reused for a second
+            # contribution (identity_a hasn't contributed to round 2
+            # yet, so this correctly exercises the "already used"
+            # check rather than the "already contributed" check).
+            with self.assertRaises(self.esusu_service.EsusuConflictError):
+                self.esusu_service.record_contribution(session, identity_a, cycle, ref_1)
+
+            # An unrecognized reference is rejected outright.
+            with self.assertRaises(self.esusu_service.EsusuValidationError):
+                self.esusu_service.record_contribution(session, identity_a, cycle, "nonexistent-ref")
+
+            ref_3 = make_payment(trader_a, "esusu-test-ref-3")
+            result_3 = self.esusu_service.record_contribution(session, identity_a, cycle, ref_3)
             cycle = self.esusu_service.get_cycle(session, cycle.id)
             self.assertFalse(result_3["round_paid"])
             self.assertEqual(cycle.current_round_number, 2)
 
-            result_4 = self.esusu_service.record_contribution(session, identity_b, cycle)
+            ref_4 = make_payment(trader_b, "esusu-test-ref-4")
+            result_4 = self.esusu_service.record_contribution(session, identity_b, cycle, ref_4)
             cycle = self.esusu_service.get_cycle(session, cycle.id)
             self.assertTrue(result_4["round_paid"])
             self.assertTrue(result_4["cycle_completed"])

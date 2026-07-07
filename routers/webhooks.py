@@ -77,6 +77,30 @@ async def receive_nomba_webhook(
             "note": "duplicate transaction ignored",
         }
 
+    # Step 5b — Only reconcile actual inbound-payment events.
+    #
+    # FIX: Nomba fires this same webhook URL for every subscribed
+    # event type — payment_success, payout_success, payment_failed,
+    # payment_reversal, payout_failed, payout_refund (see
+    # https://developer.nomba.com/products/webhooks/introduction).
+    # This handler only ever means one thing when it reconciles: money
+    # arrived in a trader's virtual account. Previously ANY event type
+    # reached reconcile() — including payout_success firing for our
+    # OWN outbound supplier payouts — which would have credited a
+    # trader's spendable/pool balance for a payment that was never
+    # actually received. webhook_service.is_payment_success() already
+    # existed for exactly this check but was never called anywhere.
+    if not webhook_service.is_payment_success(payload):
+        print(
+            f"[Webhook] Ignoring non-payment_success event "
+            f"'{payload.get('event_type')}' for "
+            f"{payload['transaction_ref']} — not reconciled."
+        )
+        return {
+            "status": "received",
+            "note": f"event_type '{payload.get('event_type')}' not reconciled",
+        }
+
     # Step 6 — Return 200 IMMEDIATELY
     # Nomba considers the webhook delivered when it receives 200.
     # Reconciliation runs in background — Nomba never waits for it.

@@ -19,6 +19,20 @@ class Trader(Base):
     bank_name = Column(String, nullable=True)
     bank_account_name = Column(String, nullable=True)
 
+    # Payout-destination bank account — DIFFERENT from
+    # virtual_account_number above, which is an INBOUND-only receiving
+    # account traders send money into. These three fields are where
+    # OjaBulk sends money OUT to a trader (e.g. an Esusu/Ajo
+    # beneficiary payout via services/transfers.py, the same Nomba
+    # Transfer API used for Pool supplier payouts). All nullable and
+    # optional: a trader who hasn't registered these yet still gets
+    # paid, just credited to their in-app spendable_balance instead of
+    # a real external bank transfer — see services/esusu.py's
+    # _credit_beneficiary() for that fallback.
+    payout_bank_code = Column(String, nullable=True)
+    payout_account_number = Column(String, nullable=True)
+    payout_account_name = Column(String, nullable=True)
+
     # Balances — always Numeric to avoid float rounding in financial data
     spendable_balance = Column(Numeric(precision=18, scale=2), default=0, nullable=False)
     total_contributed = Column(Numeric(precision=18, scale=2), default=0, nullable=False)

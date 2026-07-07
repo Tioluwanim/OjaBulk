@@ -28,6 +28,11 @@ class EsusuStatus(str, enum.Enum):
 
 class EsusuRoundStatus(str, enum.Enum):
     OPEN = "open"
+    # A real Nomba transfer to the beneficiary's registered bank
+    # account was accepted (201/PROCESSING) but not yet confirmed.
+    # See services/esusu.py's _credit_beneficiary() and
+    # background/esusu_payout_finalizer.py.
+    PAYOUT_PROCESSING = "payout_processing"
     PAID = "paid"
 
 
@@ -134,6 +139,12 @@ class EsusuRound(Base):
     collected_amount = Column(Numeric(18, 2), nullable=False, default=0)
     status = Column(Enum(EsusuRoundStatus), nullable=False, default=EsusuRoundStatus.OPEN)
 
+    # Set when a real Nomba transfer is initiated to the beneficiary's
+    # registered bank account (see services/esusu.py). NULL when the
+    # beneficiary has no payout bank details on file and was instead
+    # credited directly to their in-app spendable_balance.
+    nomba_transfer_ref = Column(String, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     paid_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -172,12 +183,26 @@ class EsusuContribution(Base):
         nullable=False,
     )
 
+    # FIX: ties this contribution to a real, webhook-verified Payment
+    # row (see models/payment.py, engine/reconciliation.py) instead of
+    # being pure self-attestation. Nullable only to keep old rows (if
+    # any exist from before this fix) from breaking migrations —
+    # services/esusu.py always sets this on every new contribution and
+    # refuses to record one without it.
+    payment_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("payments.id", ondelete="RESTRICT"),
+        nullable=True,
+        unique=True,
+    )
+
     amount = Column(Numeric(18, 2), nullable=False)
     contributed_at = Column(DateTime(timezone=True), server_default=func.now())
 
     cycle = relationship("EsusuCycle", back_populates="contributions")
     round = relationship("EsusuRound", back_populates="contributions")
     trader = relationship("Trader")
+    payment = relationship("Payment")
 
     __table_args__ = (
         UniqueConstraint("round_id", "trader_id", name="uq_esusu_round_trader"),

@@ -17,6 +17,24 @@ class EsusuCycleCreate(BaseModel):
         return value.strip()
 
 
+class EsusuContributeRequest(BaseModel):
+    """
+    FIX: previously POST /cycles/{id}/contribute took no body at all —
+    a trader could just hit the endpoint and the system believed them
+    that they'd paid, with no Payment row, no LedgerEntry, and nothing
+    tied to a real Nomba-verified transfer. Now the caller must supply
+    the nomba_transaction_ref of a real inbound payment (the same
+    transaction_ref/requestId that Nomba's payment_success webhook
+    already verified via HMAC and turned into a `Payment` row through
+    the existing reconciliation pipeline — see engine/reconciliation.py
+    and models/payment.py). services/esusu.py looks that Payment row up
+    and rejects the contribution if it doesn't exist, doesn't belong to
+    this trader, is short of the required amount, or has already been
+    used for another contribution.
+    """
+    nomba_transaction_ref: str = Field(..., min_length=1, max_length=200)
+
+
 class EsusuMemberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

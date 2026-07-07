@@ -18,6 +18,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from core.database import SessionLocal
 from engine.refund import check_and_refund_expired_pools
+from background.payout_finalizer import register_payout_finalizer_job
+from background.esusu_payout_finalizer import register_esusu_payout_finalizer_job
 
 
 # ── Job 1: Pool expiry checker ─────────────────────────────────────────────
@@ -91,5 +93,11 @@ def create_scheduler() -> AsyncIOScheduler:
         name="Render Keep-Alive Ping",
         replace_existing=True,
     )
+
+    # Pending payout finalizer — every 5 minutes
+    register_payout_finalizer_job(scheduler)
+
+    # Pending Esusu payout finalizer — every 5 minutes
+    register_esusu_payout_finalizer_job(scheduler)
 
     return scheduler

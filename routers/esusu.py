@@ -22,6 +22,7 @@ from models.esusu import (
 )
 from schemas.esusu import (
     EsusuCycleCreate,
+    EsusuContributeRequest,
     EsusuCycleResponse,
     EsusuListItem,
     EsusuJoinResponse,
@@ -239,6 +240,7 @@ def join_cycle(
 @router.post("/cycles/{cycle_id}/contribute", response_model=EsusuContributionResult)
 def contribute(
     cycle_id: str,
+    payload: EsusuContributeRequest,
     db: Session = Depends(get_db),
     identity: Identity = Depends(require_role(IdentityRole.TRADER)),
 ):
@@ -249,7 +251,12 @@ def contribute(
 
     try:
         cycle = get_cycle(db, cycle_uuid)
-        result = record_contribution(db=db, identity=identity, cycle=cycle)
+        result = record_contribution(
+            db=db,
+            identity=identity,
+            cycle=cycle,
+            nomba_transaction_ref=payload.nomba_transaction_ref,
+        )
     except EsusuNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except EsusuConflictError as e:

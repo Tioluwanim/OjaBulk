@@ -20,6 +20,12 @@ from core.database import Base
 
 class PoolStatus(str, enum.Enum):
     OPEN = "open"
+    # Target reached, Nomba transfer initiated but not yet confirmed
+    # (transfer_service returned is_pending=True). Contributions stay
+    # LOCKED and contributors are NOT told the payout is confirmed
+    # until background/payout_finalizer.py requeries Nomba and finds
+    # a final status.
+    PAYOUT_PROCESSING = "payout_processing"
     FULFILLED = "fulfilled"
     REFUNDED = "refunded"
 

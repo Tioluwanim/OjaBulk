@@ -51,26 +51,69 @@ class NombaTransferService:
         """
         Send payout to supplier from the sub-account holding pooled funds.
         """
+        return self._send_bank_transfer(
+            merchant_tx_ref=f"ojabulk-pool-payout-{pool_id}",
+            amount=amount,
+            account_number=supplier_account_number,
+            account_name=supplier_name,
+            bank_code=supplier_bank_code,
+            narration=f"OjaBulk Pool Payout - {pool_title}"[:100],
+        )
+
+    def send_to_trader(
+        self,
+        round_id: str,
+        cycle_title: str,
+        amount: float,
+        trader_account_number: str,
+        trader_bank_code: str,
+        trader_account_name: str,
+    ) -> dict:
+        """
+        Send an Esusu/Ajo round payout directly to a beneficiary
+        trader's own registered bank account — the same Nomba Transfer
+        API and sub-account used for send_to_supplier() above, just a
+        different recipient and merchant_tx_ref namespace so the two
+        payout types never collide or get confused in Nomba's
+        dashboard/requery.
+        """
+        return self._send_bank_transfer(
+            merchant_tx_ref=f"ojabulk-esusu-payout-{round_id}",
+            amount=amount,
+            account_number=trader_account_number,
+            account_name=trader_account_name,
+            bank_code=trader_bank_code,
+            narration=f"OjaBulk Esusu Payout - {cycle_title}"[:100],
+        )
+
+    def _send_bank_transfer(
+        self,
+        merchant_tx_ref: str,
+        amount: float,
+        account_number: str,
+        account_name: str,
+        bank_code: str,
+        narration: str,
+    ) -> dict:
+        """
+        Shared bank-transfer call used by both send_to_supplier() and
+        send_to_trader() — identical Nomba request shape, only the
+        recipient and merchant_tx_ref differ.
+        """
 
         if amount <= 0:
             raise ValueError(
                 "Transfer amount must be greater than zero."
             )
 
-        merchant_tx_ref = (
-            f"ojabulk-pool-payout-{pool_id}"
-        )
-
         payload = {
             "amount": float(amount),
-            "accountNumber": supplier_account_number,
-            "accountName": supplier_name,
-            "bankCode": supplier_bank_code,
+            "accountNumber": account_number,
+            "accountName": account_name,
+            "bankCode": bank_code,
             "merchantTxRef": merchant_tx_ref,
             "senderName": "OjaBulk",
-            "narration": (
-                f"OjaBulk Pool Payout - {pool_title}"
-            )[:100],
+            "narration": narration,
         }
 
         url = self._transfer_url()

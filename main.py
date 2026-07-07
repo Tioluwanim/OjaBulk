@@ -41,8 +41,10 @@ async def lifespan(app: FastAPI):
     scheduler = create_scheduler()
     scheduler.start()
     print("[OjaBulk] Background scheduler started")
-    print("[OjaBulk]   - Pool expiry check: every 30 minutes")
-    print("[OjaBulk]   - Render ping:       every 10 minutes")
+    print("[OjaBulk]   - Pool expiry check:     every 30 minutes")
+    print("[OjaBulk]   - Render ping:           every 10 minutes")
+    print("[OjaBulk]   - Payout finalizer:      every 5 minutes")
+    print("[OjaBulk]   - Esusu payout finalizer: every 5 minutes")
 
     yield
 
