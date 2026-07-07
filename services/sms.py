@@ -33,19 +33,29 @@ the SMS transport layer, never for OTP logic itself.
 
 ENV VARS REQUIRED (already present in core/config.py):
     TERMII_API_KEY  - from your Termii dashboard (Settings > API)
-    SMS_SENDER_ID   - optional. Termii's /sms/send endpoint always
-                       requires a "from" value in the payload -- there
-                       is no way to omit it entirely (checked their
-                       docs; every documented example includes one).
-                       A custom brand name like "OjaBulk" needs
-                       Termii's approval first (can take ~a day), so
-                       this defaults to "Termii" -- their own platform
-                       default, used directly in Termii's own docs
-                       examples -- which works immediately with no
-                       registration/approval step. Set SMS_SENDER_ID
-                       to your own approved name later once it clears
-                       review; nothing else in this file needs to
-                       change.
+    SMS_SENDER_ID   - REQUIRED, and must be a sender ID already
+                       approved for YOUR specific workspace. There is
+                       no universal default that works across every
+                       Termii account -- "Termii" itself is NOT a
+                       usable fallback (confirmed: it returns
+                       SENDER_ID_NOT_APPROVED unless your workspace
+                       specifically has it whitelisted). In Nigeria,
+                       every alphanumeric sender ID needs approval from
+                       all four network operators (MTN, Glo, Airtel,
+                       9mobile) -- this is an NCC requirement, not a
+                       Termii-specific one, so there's no way around it
+                       for real alphanumeric-sender delivery.
+
+                       To find out what IS already approved for your
+                       account, run:
+                           python services/sms.py list-senders
+                       This calls Termii's GET /api/sender-id and
+                       prints every sender ID on your workspace along
+                       with its status ("active" = usable right now).
+                       If the list is empty, you'll need to submit one
+                       via Termii's dashboard/Sender ID request API and
+                       wait for approval (their docs cite 1-5 business
+                       days) -- there is no faster alphanumeric path.
 """
 
 import requests
@@ -56,11 +66,20 @@ from core.config import settings
 class SMSService:
 
     BASE_URL = "https://v4.api.termii.com/api/sms/send"
-    DEFAULT_SENDER_ID = "Termii"
 
     def __init__(self):
         self.api_key = settings.TERMII_API_KEY
-        self.sender_id = settings.SMS_SENDER_ID or self.DEFAULT_SENDER_ID
+        self.sender_id = settings.SMS_SENDER_ID
+
+        if not self.sender_id:
+            print(
+                "[SMS/Termii] WARNING: SMS_SENDER_ID is not set. There is "
+                "no working universal default -- every send will fail "
+                "with SENDER_ID_NOT_APPROVED until you set this to a "
+                "sender ID actually approved for your workspace. Run "
+                "`python services/sms.py list-senders` to see what's "
+                "available."
+            )
 
     # ==========================================================
     # Phone normalization
@@ -347,6 +366,20 @@ sms_service = SMSService()
 
 if __name__ == "__main__":
     import os
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "list-senders":
+        # Quick diagnostic: which sender IDs (if any) are already
+        # approved for THIS workspace/api_key. Run with:
+        #   python services/sms.py list-senders
+        resp = requests.get(
+            "https://v3.api.termii.com/api/sender-id",
+            params={"api_key": settings.TERMII_API_KEY},
+            timeout=15,
+        )
+        print(f"Status: {resp.status_code}")
+        print(resp.text)
+        sys.exit(0)
 
     print("Testing Termii SMS Service...")
 
