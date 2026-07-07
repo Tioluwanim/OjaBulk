@@ -1,7 +1,6 @@
 import os
 import json
 import hmac
-import base64
 import hashlib
 
 from typing import Tuple
@@ -98,13 +97,9 @@ class NombaWebhookService:
             self._get_secret().encode(),
             hashing_payload.encode(),
             hashlib.sha256,
-        ).digest()
+        ).hexdigest()
 
-        return (
-            base64
-            .b64encode(digest)
-            .decode()
-        )
+        return digest
 
     def verify(
         self,
