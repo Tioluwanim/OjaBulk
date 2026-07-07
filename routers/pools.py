@@ -15,6 +15,7 @@ rather than folded into GET /pools/{id}.
 """
 
 import uuid
+from decimal import Decimal
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -24,7 +25,9 @@ from models.pool import Pool, PoolStatus
 from models.pool_contribution import PoolContribution, ContributionStatus
 from models.trader import Trader
 from models.identity import Identity, IdentityRole
+from models.ledger_entry import LedgerEntry, EntryType
 from engine.refund import refund_pool
+from engine.payout import trigger_payout
 from services.auth import require_role, get_current_identity, get_current_identity_optional
 from schemas.pool import (
     PoolCreate,
@@ -32,6 +35,8 @@ from schemas.pool import (
     PoolDetailResponse,
     PoolJoinRequest,
     PoolJoinResponse,
+    PoolContributeFromSpendableRequest,
+    PoolContributeFromSpendableResponse,
     ContributorResponse,
     WholesalerConfirmResponse,
 )
@@ -285,6 +290,161 @@ def join_pool(
         pool_title=pool.title,
         target=float(pool.target_amount),
         progress=_progress_pct(pool),
+    )
+
+
+@router.post("/{pool_id}/contribute-from-spendable", response_model=PoolContributeFromSpendableResponse)
+def contribute_from_spendable(
+    pool_id: str,
+    payload: PoolContributeFromSpendableRequest,
+    db: Session = Depends(get_db),
+    identity: Identity = Depends(require_role(IdentityRole.TRADER)),
+):
+    """
+    POST /pools/{id}/contribute-from-spendable
+
+    Real gap this closes: the only way money ever locked into a pool
+    was through engine/reconciliation.py's split, which only runs on a
+    brand-new inbound Nomba payment. A trader with existing spendable
+    balance (e.g. from an overpayment on a prior pool, or a payment
+    made with no active pool selected) had no way to move that balance
+    into a pool they've since joined — they'd have to send an entirely
+    new bank transfer instead of using money already sitting in their
+    OjaBulk wallet.
+
+    Mirrors engine/reconciliation.py's locking pattern: row-locks the
+    trader (same fix as the original row-locking audit finding) to
+    prevent a race between two concurrent requests double-spending the
+    same spendable balance, caps the amount locked at the pool's
+    remaining gap (excess simply isn't moved, same as reconciliation's
+    behavior — it stays spendable), writes a POOL_LOCK ledger entry,
+    and triggers payout via the same trigger_payout() used everywhere
+    else if this contribution completes the pool.
+    """
+    try:
+        pool_uuid = uuid.UUID(pool_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="pool_id must be a valid UUID")
+
+    if identity.linked_trader_id is None:
+        raise HTTPException(status_code=404, detail="This identity is not linked to a trader record.")
+
+    # Row-lock the trader for the duration of this transaction so two
+    # concurrent contribute-from-spendable calls (or a race with a
+    # webhook-driven reconcile()) can't both read the same
+    # spendable_balance and double-spend it.
+    trader = (
+        db.query(Trader)
+        .filter(Trader.id == identity.linked_trader_id)
+        .with_for_update()
+        .first()
+    )
+    if not trader:
+        raise HTTPException(status_code=404, detail="Trader not found")
+
+    pool = (
+        db.query(Pool)
+        .filter(Pool.id == pool_uuid)
+        .with_for_update()
+        .first()
+    )
+    if not pool:
+        raise HTTPException(status_code=404, detail="Pool not found")
+    if pool.status != PoolStatus.OPEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pool is {pool.status.value} — cannot contribute to a closed pool",
+        )
+
+    requested = Decimal(str(payload.amount))
+    current_spendable = Decimal(str(trader.spendable_balance))
+
+    if requested > current_spendable:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"You only have ₦{current_spendable:,.2f} spendable, "
+                f"cannot lock ₦{requested:,.2f}."
+            ),
+        )
+
+    remaining_gap = max(
+        Decimal("0"),
+        Decimal(str(pool.target_amount)) - Decimal(str(pool.current_locked_amount)),
+    )
+    if remaining_gap <= 0:
+        raise HTTPException(status_code=400, detail="This pool has already reached its target.")
+
+    amount_to_lock = min(requested, remaining_gap)
+
+    contribution = (
+        db.query(PoolContribution)
+        .filter(
+            PoolContribution.trader_id == trader.id,
+            PoolContribution.pool_id == pool_uuid,
+            PoolContribution.status == ContributionStatus.LOCKED,
+        )
+        .first()
+    )
+    if not contribution:
+        contribution = PoolContribution(
+            trader_id=trader.id,
+            pool_id=pool_uuid,
+            amount_locked=0,
+            status=ContributionStatus.LOCKED,
+        )
+        db.add(contribution)
+        db.flush()
+
+    contribution.amount_locked = float(
+        Decimal(str(contribution.amount_locked)) + amount_to_lock
+    )
+
+    new_spendable = current_spendable - amount_to_lock
+    trader.spendable_balance = float(new_spendable)
+
+    pool.current_locked_amount = float(
+        Decimal(str(pool.current_locked_amount)) + amount_to_lock
+    )
+
+    db.add(
+        LedgerEntry(
+            trader_id=trader.id,
+            pool_id=pool.id,
+            entry_type=EntryType.POOL_LOCK,
+            amount=float(amount_to_lock),
+            balance_after=float(new_spendable),
+            note=(
+                f"₦{amount_to_lock:,.2f} moved from spendable balance "
+                f"and locked in {pool.title}"
+            ),
+        )
+    )
+
+    db.commit()
+    db.refresh(pool)
+    db.refresh(trader)
+
+    pool_fulfilled = False
+    if pool.status == PoolStatus.OPEN and Decimal(str(pool.current_locked_amount)) >= Decimal(str(pool.target_amount)):
+        try:
+            trigger_payout(db=db, pool=pool)
+            pool_fulfilled = True
+            db.refresh(pool)
+        except Exception as e:
+            print(f"[ContributeFromSpendable] Payout failed for pool {pool.id}: {e}")
+
+    return PoolContributeFromSpendableResponse(
+        pool_id=str(pool.id),
+        trader_id=str(trader.id),
+        amount_locked=float(amount_to_lock),
+        new_spendable_balance=float(trader.spendable_balance),
+        pool_current_locked_amount=float(pool.current_locked_amount),
+        pool_fulfilled=pool_fulfilled,
+        message=(
+            f"₦{amount_to_lock:,.2f} locked in {pool.title}"
+            + (" — pool fulfilled!" if pool_fulfilled else "")
+        ),
     )
 
 
