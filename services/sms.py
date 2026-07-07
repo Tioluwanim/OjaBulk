@@ -1,7 +1,7 @@
 """
 services/sms.py
 
-SMS notifications via Africa's Talking.
+SMS notifications via Termii.
 
 Supported messages (unchanged -- every call site elsewhere in the
 codebase, e.g. services/auth.py, engine/payout.py, engine/refund.py,
@@ -14,35 +14,38 @@ public interface of this module):
 4. Pool refunded
 5. Login OTP
 
-WHY AFRICA'S TALKING:
+WHY TERMII:
 Robase (a prior provider) sat behind Cloudflare, and server-to-server
 calls were being intercepted by a Cloudflare bot-challenge page
 (HTTP 403, HTML "Just a moment..." body, Cf-Mitigated: challenge)
 before ever reaching Robase's actual backend -- a block on Robase's
 side, not fixable from here.
 
-Africa's Talking is used instead because this app already has an
-approved Africa's Talking account and live credentials wired for the
-USSD menu (see routers/ussd.py, services/ussd.py) -- AFRICAS_TALKING_API_KEY
-and AFRICAS_TALKING_USERNAME in core/config.py. SMS runs on the same
-account/credentials, so no new signup, no new sender-ID approval wait.
+Termii is a solid, Nigeria-focused alternative: account creation and
+API key issuance are free (no card required, no upfront deposit) --
+you only fund the wallet when you're ready to actually send messages,
+and Nigerian SMS is priced per-message in the low-naira range, so a
+small top-up comfortably covers a hackathon demo.
 
 OTP generation and verification are handled internally by
-services/auth.py and the OTPSession table -- Africa's Talking is used
-ONLY as the SMS transport layer, never for OTP logic itself.
+services/auth.py and the OTPSession table -- Termii is used ONLY as
+the SMS transport layer, never for OTP logic itself.
 
 ENV VARS REQUIRED (already present in core/config.py):
-    AFRICAS_TALKING_API_KEY   - from the Africa's Talking dashboard
-    AFRICAS_TALKING_USERNAME  - your AT app username, or "sandbox" for
-                                 the free sandbox app (sandbox messages
-                                 are simulated -- they don't reach a
-                                 real handset, but let you verify the
-                                 integration end-to-end before your
-                                 live username/sender ID is approved)
-    SMS_SENDER_ID              - optional registered short code / alpha
-                                 sender ID. Leave unset to send from
-                                 AT's shared default while an alpha
-                                 sender ID is pending approval.
+    TERMII_API_KEY  - from your Termii dashboard (Settings > API)
+    SMS_SENDER_ID   - optional. Termii's /sms/send endpoint always
+                       requires a "from" value in the payload -- there
+                       is no way to omit it entirely (checked their
+                       docs; every documented example includes one).
+                       A custom brand name like "OjaBulk" needs
+                       Termii's approval first (can take ~a day), so
+                       this defaults to "Termii" -- their own platform
+                       default, used directly in Termii's own docs
+                       examples -- which works immediately with no
+                       registration/approval step. Set SMS_SENDER_ID
+                       to your own approved name later once it clears
+                       review; nothing else in this file needs to
+                       change.
 """
 
 import requests
@@ -52,19 +55,12 @@ from core.config import settings
 
 class SMSService:
 
-    PRODUCTION_URL = "https://api.africastalking.com/version1/messaging"
-    SANDBOX_URL = "https://api.sandbox.africastalking.com/version1/messaging"
+    BASE_URL = "https://v3.api.termii.com/api/sms/send"
+    DEFAULT_SENDER_ID = "Termii"
 
     def __init__(self):
-        self.api_key = settings.AFRICAS_TALKING_API_KEY
-        self.username = "radet"
-
-        # Africa's Talking routes "sandbox" username to a separate
-        # simulated environment -- anything else is treated as a real
-        # live app username against the production endpoint.
-        self.base_url = (
-            self.SANDBOX_URL if self.username == "sandbox" else self.PRODUCTION_URL
-        )
+        self.api_key = settings.TERMII_API_KEY
+        self.sender_id = settings.SMS_SENDER_ID or self.DEFAULT_SENDER_ID
 
     # ==========================================================
     # Phone normalization
@@ -72,23 +68,23 @@ class SMSService:
 
     def _normalize_phone(self, phone: str) -> str:
         """
-        Converts Nigerian numbers to E.164 format, which is what
-        Africa's Talking expects in the "to" field.
+        Converts Nigerian numbers to the format Termii expects:
+        234XXXXXXXXXX (no leading +, no leading 0).
 
         Examples:
-            08012345678     -> +2348012345678
-            2348012345678   -> +2348012345678
-            +2348012345678  -> +2348012345678
+            08012345678     -> 2348012345678
+            2348012345678   -> 2348012345678
+            +2348012345678  -> 2348012345678
         """
         phone = phone.strip().replace(" ", "").replace("-", "")
 
         if phone.startswith("+234"):
-            return phone
+            return phone[1:]
         if phone.startswith("234"):
-            return f"+{phone}"
+            return phone
         if phone.startswith("0"):
-            return f"+234{phone[1:]}"
-        return f"+234{phone}"
+            return f"234{phone[1:]}"
+        return f"234{phone}"
 
     # ==========================================================
     # Send
@@ -96,10 +92,10 @@ class SMSService:
 
     def _send_sms(self, phone: str, message: str) -> bool:
         """
-        Sends SMS via Africa's Talking's /messaging endpoint.
+        Sends SMS via Termii's /sms/send endpoint.
 
         Returns:
-            True if AT accepted the message for at least one recipient
+            True if Termii accepted and actually queued the message
             False otherwise
 
         Never raises -- SMS failure must never crash a request (see
@@ -107,44 +103,52 @@ class SMSService:
         request all continue normally even if this returns False,
         since the underlying financial/auth action already succeeded
         by the time the SMS fires).
+
+        NOTE ON "accepted but never arrives":
+        Termii can return HTTP 200 while still rejecting the message
+        downstream (e.g. an unapproved custom Sender ID on a new
+        account). A real success always includes a message_id in the
+        response body -- a 200 with no message_id is treated as a
+        failure here, not a silent success.
         """
-        if not self.api_key or not self.username:
-            print("[SMS] Missing AFRICAS_TALKING_API_KEY or AFRICAS_TALKING_USERNAME")
+        if not self.api_key:
+            print("[SMS/Termii] Missing TERMII_API_KEY")
             return False
 
         phone = self._normalize_phone(phone)
 
-        headers = {
-            "apiKey": self.api_key,
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
+        payload = {
+            "to": phone,
+            "from": self.sender_id,
+            "sms": message,
+            "type": "plain",
+            "channel": "generic",
+            "api_key": self.api_key,
         }
 
-        data = {
-            "username": self.username,
-            "to": phone,
-            "message": message,
-        }
         try:
             response = requests.post(
-                self.base_url,
-                headers=headers,
-                data=data,
+                self.BASE_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=payload,
                 timeout=15,
             )
         except requests.exceptions.Timeout:
-            print(f"[SMS/AfricasTalking] Timeout sending to {phone}")
+            print(f"[SMS/Termii] Timeout sending to {phone}")
             return False
         except requests.exceptions.ConnectionError as e:
-            print(f"[SMS/AfricasTalking] Connection error for {phone}: {e}")
+            print(f"[SMS/Termii] Connection error for {phone}: {e}")
             return False
         except Exception as e:
-            print(f"[SMS/AfricasTalking] Exception for {phone}: {e}")
+            print(f"[SMS/Termii] Exception for {phone}: {e}")
             return False
 
-        if response.status_code not in (200, 201):
+        if response.status_code != 200:
             print(
-                f"[SMS/AfricasTalking] Send failed for {phone} "
+                f"[SMS/Termii] Send failed for {phone} "
                 f"[{response.status_code}]: {response.text[:300]}"
             )
             return False
@@ -152,43 +156,21 @@ class SMSService:
         try:
             body = response.json()
         except ValueError:
-            print(
-                f"[SMS/AfricasTalking] Non-JSON response for {phone}: "
-                f"{response.text[:300]}"
-            )
+            print(f"[SMS/Termii] Non-JSON response for {phone}: {response.text[:300]}")
             return False
 
-        recipients = (
-            body.get("SMSMessageData", {}).get("Recipients", [])
-        )
-
-        if not recipients:
+        if not body.get("message_id"):
             print(
-                f"[SMS/AfricasTalking] No recipients in response for "
-                f"{phone}. Body: {body}"
+                f"[SMS/Termii] 200 but no message_id for {phone} -- "
+                f"treating as failed. Body: {body}"
             )
             return False
-
-        # AT returns per-recipient status, e.g. "Success" or a specific
-        # rejection reason (bad number, insufficient balance, sender ID
-        # not allowed, etc). Treat anything other than "Success" as a
-        # failure for that recipient.
-        recipient = recipients[0]
-        status = recipient.get("status", "")
-
-        if status == "Success":
-            print(
-                f"[SMS/AfricasTalking] Sent to {phone} "
-                f"(messageId={recipient.get('messageId')}, "
-                f"cost={recipient.get('cost')})"
-            )
-            return True
 
         print(
-            f"[SMS/AfricasTalking] Rejected for {phone}: "
-            f"status={status}, statusCode={recipient.get('statusCode')}"
+            f"[SMS/Termii] Sent to {phone} "
+            f"(message_id={body.get('message_id')}, balance={body.get('balance')})"
         )
-        return False
+        return True
 
     # ==========================================================
     # OTP
@@ -263,6 +245,24 @@ class SMSService:
         return self._send_sms(phone, message)
 
     # ==========================================================
+    # POOL PAYOUT PROCESSING (transfer accepted, not yet confirmed)
+    # ==========================================================
+
+    def send_pool_payout_processing(
+        self,
+        phone: str,
+        trader_name: str,
+        pool_title: str,
+        supplier_name: str,
+    ) -> bool:
+        message = (
+            f"OjaBulk: {pool_title} reached its target!\n"
+            f"Payment to {supplier_name} is processing.\n"
+            f"We'll confirm once Nomba settles the transfer."
+        )
+        return self._send_sms(phone, message)
+
+    # ==========================================================
     # POOL FULFILLED
     # ==========================================================
 
@@ -300,6 +300,46 @@ class SMSService:
         )
         return self._send_sms(phone, message)
 
+    # ==========================================================
+    # ESUSU PAYOUT PROCESSING (real bank transfer accepted, not yet confirmed)
+    # ==========================================================
+
+    def send_esusu_payout_processing(
+        self,
+        phone: str,
+        trader_name: str,
+        amount: float,
+        round_number: int,
+    ) -> bool:
+        first_name = trader_name.split()[0]
+        message = (
+            f"OjaBulk: Congrats {first_name}!\n"
+            f"Your N{amount:,.0f} Esusu payout (round {round_number}) "
+            f"is processing to your bank account.\n"
+            f"We'll confirm once Nomba settles it."
+        )
+        return self._send_sms(phone, message)
+
+    # ==========================================================
+    # ESUSU PAYOUT
+    # ==========================================================
+
+    def send_esusu_payout(
+        self,
+        phone: str,
+        trader_name: str,
+        amount: float,
+        round_number: int,
+    ) -> bool:
+        first_name = trader_name.split()[0]
+        message = (
+            f"OjaBulk: Congrats {first_name}!\n"
+            f"You received N{amount:,.0f} as this round's "
+            f"Esusu beneficiary (round {round_number}).\n"
+            f"Added to your spendable balance."
+        )
+        return self._send_sms(phone, message)
+
 
 # Shared singleton instance
 sms_service = SMSService()
@@ -308,7 +348,7 @@ sms_service = SMSService()
 if __name__ == "__main__":
     import os
 
-    print(f"Testing Africa's Talking SMS Service (username: {sms_service.username})...")
+    print("Testing Termii SMS Service...")
 
     test_phone = os.getenv("SMS_TEST_PHONE", "")
 
