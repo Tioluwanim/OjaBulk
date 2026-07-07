@@ -37,23 +37,29 @@ async def receive_nomba_webhook(
     Entry point for all Nomba payment notifications.
     Processes every inbound transfer to any trader's virtual account.
     """
-    # Step 1 — Read raw body (must be raw for HMAC verification)
+    # Step 1 — Read raw body
     raw_body = await request.body()
 
-    # Step 2 — Verify HMAC signature
-    signature = request.headers.get("x-nomba-signature", "")
-    try:
-        webhook_service.verify(raw_body, signature)
-    except WebhookVerificationError as e:
-        # Log but do not expose details to caller
-        print(f"[Webhook] Verification failed: {e}")
-        raise HTTPException(status_code=400, detail="Invalid webhook signature")
-
-    # Step 3 — Parse body
+    # Step 2 — Parse body (Required first because verify() needs a dict)
     try:
         body = json.loads(raw_body)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    # Step 3 — Verify HMAC signature
+    signature = request.headers.get("nomba-signature", "")
+    timestamp = request.headers.get("nomba-timestamp", "")
+    
+    try:
+        webhook_service.verify(
+            payload=body,
+            signature=signature,
+            timestamp=timestamp
+        )
+    except WebhookVerificationError as e:
+        # Log but do not expose details to caller
+        print(f"[Webhook] Verification failed: {e}")
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     # Step 4 — Parse payload fields
     try:
