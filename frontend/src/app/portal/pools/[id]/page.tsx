@@ -2,12 +2,14 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Store, Calendar, Users, Copy, Check } from "lucide-react";
+import { ArrowLeft, Store, Calendar, Users, Copy, Check, Wallet } from "lucide-react";
 import { RequireAuth } from "@/components/portal/RequireAuth";
 import { PortalNav } from "@/components/portal/PortalNav";
 import { Spinner } from "@/components/ui/Spinner";
+import { Input } from "@/components/ui/Input";
 import { useAuth } from "@/context/AuthContext";
-import { getPool } from "@/lib/api/pools";
+import { getPool, contributeFromSpendable } from "@/lib/api/pools";
+import { ApiError } from "@/lib/api-client";
 import { formatNaira, formatRelativeTime } from "@/lib/format";
 import type { PoolDetailResponse } from "@/lib/types";
 
@@ -23,6 +25,10 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [spendableAmount, setSpendableAmount] = useState("");
+  const [contributingFromSpendable, setContributingFromSpendable] = useState(false);
+  const [spendableError, setSpendableError] = useState<string | null>(null);
+  const [spendableSuccess, setSpendableSuccess] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -40,6 +46,33 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function handleContributeFromSpendable() {
+    const amount = parseFloat(spendableAmount);
+    setSpendableError(null);
+    setSpendableSuccess(null);
+
+    if (!amount || amount <= 0) {
+      setSpendableError("Enter an amount greater than zero.");
+      return;
+    }
+    if (trader && amount > trader.spendable_balance) {
+      setSpendableError(`You only have ${formatNaira(trader.spendable_balance)} spendable.`);
+      return;
+    }
+
+    setContributingFromSpendable(true);
+    try {
+      const result = await contributeFromSpendable(poolId, amount);
+      setSpendableSuccess(result.message);
+      setSpendableAmount("");
+      await load();
+    } catch (err) {
+      setSpendableError(err instanceof ApiError ? err.message : "Could not contribute.");
+    } finally {
+      setContributingFromSpendable(false);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -199,6 +232,59 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
+        </div>
+      )}
+
+      {pool.status === "open" && trader && trader.spendable_balance > 0 && (
+        <div className="mt-6 card-surface p-6">
+          <div className="flex items-center gap-2">
+            <Wallet className="h-5 w-5 text-gold-600" />
+            <p className="text-xs font-medium uppercase tracking-wider text-charcoal-soft">
+              Use your spendable balance
+            </p>
+          </div>
+          <p className="mt-1 text-sm text-charcoal-soft">
+            You have {formatNaira(trader.spendable_balance)} sitting in your
+            OjaBulk wallet — lock some of it into this pool instead of
+            sending a new bank transfer.
+          </p>
+
+          <div className="mt-3 flex gap-2">
+            <Input
+              value={spendableAmount}
+              onChange={(e) => setSpendableAmount(e.target.value)}
+              type="number"
+              min="0"
+              max={trader.spendable_balance}
+              placeholder="Amount to lock"
+              className="!py-2.5 text-sm"
+            />
+            <button
+              onClick={handleContributeFromSpendable}
+              disabled={contributingFromSpendable}
+              className="btn-gold shrink-0 !py-2.5 text-sm disabled:opacity-60"
+            >
+              {contributingFromSpendable ? <Spinner className="h-4 w-4" /> : "Lock it in"}
+            </button>
+          </div>
+
+          <button
+            onClick={() => setSpendableAmount(String(trader.spendable_balance))}
+            className="mt-2 text-xs font-medium text-gold-700 hover:underline"
+          >
+            Use full balance ({formatNaira(trader.spendable_balance)})
+          </button>
+
+          {spendableError && (
+            <p className="mt-3 rounded-xl bg-danger-bg px-3 py-2 text-xs text-danger">
+              {spendableError}
+            </p>
+          )}
+          {spendableSuccess && (
+            <p className="mt-3 rounded-xl bg-success-bg px-3 py-2 text-xs text-success">
+              {spendableSuccess}
+            </p>
+          )}
         </div>
       )}
 
