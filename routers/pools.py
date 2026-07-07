@@ -29,6 +29,7 @@ from models.ledger_entry import LedgerEntry, EntryType
 from engine.refund import refund_pool
 from engine.payout import trigger_payout
 from services.auth import require_role, get_current_identity, get_current_identity_optional
+from routers.auth import verify_admin_key
 from schemas.pool import (
     PoolCreate,
     PoolResponse,
@@ -37,6 +38,7 @@ from schemas.pool import (
     PoolJoinResponse,
     PoolContributeFromSpendableRequest,
     PoolContributeFromSpendableResponse,
+    PoolRetryPayoutResponse,
     ContributorResponse,
     WholesalerConfirmResponse,
 )
@@ -444,6 +446,80 @@ def contribute_from_spendable(
         message=(
             f"₦{amount_to_lock:,.2f} locked in {pool.title}"
             + (" — pool fulfilled!" if pool_fulfilled else "")
+        ),
+    )
+
+
+@router.post("/{pool_id}/retry-payout", response_model=PoolRetryPayoutResponse)
+def retry_payout(
+    pool_id: str,
+    db: Session = Depends(get_db),
+    _admin: None = Depends(verify_admin_key),
+):
+    """
+    POST /pools/{id}/retry-payout
+    Admin-only (requires X-Admin-Key header).
+
+    Manually forces an immediate retry of trigger_payout() for a pool
+    that's fully funded but stuck at OPEN status — the same situation
+    background/payout_finalizer.py already retries automatically every
+    5 minutes (see that file's docstring for why a pool can get stuck
+    here: trigger_payout's call to Nomba's Transfer API can raise
+    AFTER the pool's current_locked_amount was already committed,
+    leaving it fully funded but never actually paid out).
+
+    This exists for exactly one situation: you've just fixed the
+    underlying issue (e.g. Nomba Transfers API permissions, credential
+    swap) and don't want to wait up to 5 minutes for the next
+    scheduled retry — most likely to matter live, mid-demo.
+    """
+    try:
+        pool_uuid = uuid.UUID(pool_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="pool_id must be a valid UUID")
+
+    pool = db.query(Pool).filter(Pool.id == pool_uuid).first()
+    if not pool:
+        raise HTTPException(status_code=404, detail="Pool not found")
+
+    if pool.status == PoolStatus.FULFILLED:
+        return PoolRetryPayoutResponse(
+            pool_id=str(pool.id),
+            status=pool.status.value,
+            pool_fulfilled=True,
+            message="Pool is already fulfilled — nothing to retry.",
+        )
+
+    if pool.status not in (PoolStatus.OPEN, PoolStatus.PAYOUT_PROCESSING):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pool is {pool.status.value} — payout cannot be retried in this state.",
+        )
+
+    if pool.status == PoolStatus.OPEN and Decimal(str(pool.current_locked_amount)) < Decimal(str(pool.target_amount)):
+        raise HTTPException(
+            status_code=400,
+            detail="Pool has not reached its target amount yet — nothing to pay out.",
+        )
+
+    try:
+        trigger_payout(db=db, pool=pool)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Payout retry failed: {e}",
+        )
+
+    db.refresh(pool)
+
+    return PoolRetryPayoutResponse(
+        pool_id=str(pool.id),
+        status=pool.status.value,
+        pool_fulfilled=pool.status == PoolStatus.FULFILLED,
+        message=(
+            "Payout confirmed and pool fulfilled."
+            if pool.status == PoolStatus.FULFILLED
+            else "Transfer accepted by Nomba, awaiting confirmation."
         ),
     )
 
