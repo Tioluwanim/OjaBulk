@@ -1,22 +1,19 @@
-import hmac
-import hashlib
-import json
 import os
+import json
+import hmac
+import base64
+import hashlib
 
-from typing import Optional, Tuple
+from typing import Tuple
 
 from fastapi import Request, HTTPException
 
 
 class WebhookVerificationError(Exception):
-    """Raised when webhook verification fails."""
     pass
 
 
 class NombaWebhookService:
-    """
-    Nomba webhook verification and payload parsing.
-    """
 
     def __init__(self):
         self.signing_secret = os.getenv(
@@ -32,43 +29,110 @@ class NombaWebhookService:
 
         return self.signing_secret
 
-    def _compute_signature(
+    def _generate_signature(
         self,
-        raw_body: bytes
+        payload: dict,
+        timestamp: str,
     ) -> str:
-        """
-        Compute HMAC SHA256 signature.
-        """
 
-        secret = self._get_secret()
+        data = payload.get("data", {})
+        merchant = data.get("merchant", {})
+        transaction = data.get("transaction", {})
 
-        return hmac.new(
-            key=secret.encode("utf-8"),
-            msg=raw_body,
-            digestmod=hashlib.sha256,
-        ).hexdigest()
+        event_type = payload.get(
+            "event_type",
+            ""
+        )
+
+        request_id = payload.get(
+            "requestId",
+            ""
+        )
+
+        user_id = merchant.get(
+            "userId",
+            ""
+        )
+
+        wallet_id = merchant.get(
+            "walletId",
+            ""
+        )
+
+        transaction_id = transaction.get(
+            "transactionId",
+            ""
+        )
+
+        transaction_type = transaction.get(
+            "type",
+            ""
+        )
+
+        transaction_time = transaction.get(
+            "time",
+            ""
+        )
+
+        response_code = transaction.get(
+            "responseCode",
+            ""
+        )
+
+        if response_code == "null":
+            response_code = ""
+
+        hashing_payload = (
+            f"{event_type}:"
+            f"{request_id}:"
+            f"{user_id}:"
+            f"{wallet_id}:"
+            f"{transaction_id}:"
+            f"{transaction_type}:"
+            f"{transaction_time}:"
+            f"{response_code}:"
+            f"{timestamp}"
+        )
+
+        digest = hmac.new(
+            self._get_secret().encode(),
+            hashing_payload.encode(),
+            hashlib.sha256,
+        ).digest()
+
+        return (
+            base64
+            .b64encode(digest)
+            .decode()
+        )
 
     def verify(
         self,
-        raw_body: bytes,
-        nomba_signature: str,
+        payload: dict,
+        signature: str,
+        timestamp: str,
     ) -> None:
-        """
-        Verify Nomba webhook signature.
-        """
 
-        if not nomba_signature:
+        if not signature:
             raise WebhookVerificationError(
-                "Missing x-nomba-signature header."
+                "Missing nomba-signature header."
             )
 
-        expected = self._compute_signature(
-            raw_body
+        if not timestamp:
+            raise WebhookVerificationError(
+                "Missing nomba-timestamp header."
+            )
+
+        expected_signature = (
+            self._generate_signature(
+                payload,
+                timestamp,
+            )
         )
 
         if not hmac.compare_digest(
-            expected,
-            nomba_signature,
+            expected_signature,
+            signature,
         ):
             raise WebhookVerificationError(
                 "Invalid webhook signature."
@@ -78,18 +142,25 @@ class NombaWebhookService:
         self,
         body: dict
     ) -> dict:
-        """
-        Extract OjaBulk fields from webhook.
-        """
 
-        request_id = body.get("requestId")
-        event_type = body.get("event_type")
+        request_id = body.get(
+            "requestId"
+        )
 
-        data = body.get("data", {})
+        event_type = body.get(
+            "event_type"
+        )
+
+        data = body.get(
+            "data",
+            {}
+        )
+
         transaction = data.get(
             "transaction",
             {}
         )
+
         customer = data.get(
             "customer",
             {}
@@ -155,13 +226,11 @@ class NombaWebhookService:
         self,
         payload: dict
     ) -> bool:
-        """
-        Check if webhook represents
-        a successful payment.
-        """
 
         return (
-            payload.get("event_type")
+            payload.get(
+                "event_type"
+            )
             == "payment_success"
         )
 
@@ -174,36 +243,45 @@ webhook_service = (
 async def get_raw_body_and_verify(
     request: Request
 ) -> Tuple[bytes, dict]:
-    """
-    FastAPI helper for webhook routes.
-    """
 
     raw_body = await request.body()
 
-    signature = request.headers.get(
-        "x-nomba-signature",
-        ""
-    )
-
-    try:
-        webhook_service.verify(
-            raw_body,
-            signature,
-        )
-    except WebhookVerificationError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=str(e),
-        )
-
     try:
         body = json.loads(
-            raw_body.decode("utf-8")
+            raw_body.decode(
+                "utf-8"
+            )
         )
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=400,
             detail="Invalid JSON payload",
+        )
+
+    signature = (
+        request.headers.get(
+            "nomba-signature",
+            ""
+        )
+    )
+
+    timestamp = (
+        request.headers.get(
+            "nomba-timestamp",
+            ""
+        )
+    )
+
+    try:
+        webhook_service.verify(
+            payload=body,
+            signature=signature,
+            timestamp=timestamp,
+        )
+    except WebhookVerificationError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=str(e),
         )
 
     return raw_body, body
