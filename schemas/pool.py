@@ -44,10 +44,64 @@ class PoolCreate(BaseModel):
             raise ValueError("supplier_account_number must be a 10-digit NUBAN")
         return v
 
+    @field_validator("supplier_bank_code")
+    @classmethod
+    def validate_bank_code(cls, v: str) -> str:
+        """
+        Real gap this closes: nothing previously validated bank code
+        format at pool-creation time — a malformed code (wrong digit
+        count) only ever surfaced when the payout actually fired via
+        Nomba's Transfer API, which can be days later once a pool
+        hits target, e.g. "bankCode must be exactly 3 or 6 digits"
+        from Nomba's own error response. Catching it here means a bad
+        bank code fails loudly at creation, not silently until payout.
+        """
+        if not v.isdigit() or len(v) not in (3, 6):
+            raise ValueError("supplier_bank_code must be exactly 3 or 6 digits")
+        return v
+
     @field_validator("title", "supplier_name", "market_name")
     @classmethod
     def strip_text(cls, v: str) -> str:
         return v.strip()
+
+
+class PoolUpdate(BaseModel):
+    """
+    What an admin may submit to PATCH /pools/{id}. Every field is
+    optional — only the ones provided get changed. Deliberately
+    excludes target_amount, current_locked_amount, and status: those
+    are backend-controlled state tied to real money already
+    contributed, and changing them here would desync the pool from
+    the LedgerEntry/PoolContribution rows that back it. This endpoint
+    exists specifically for fixing supplier/deadline data-entry
+    mistakes (e.g. a malformed bank code) before or after a pool is
+    created, not for altering financial state.
+    """
+    title: str | None = Field(None, min_length=3, max_length=200)
+    supplier_name: str | None = Field(None, min_length=2, max_length=200)
+    supplier_account_number: str | None = Field(None, min_length=10, max_length=10)
+    supplier_bank_code: str | None = Field(None, min_length=1, max_length=10)
+    deadline: datetime | None = None
+
+    @field_validator("supplier_account_number")
+    @classmethod
+    def validate_nuban(cls, v: str | None) -> str | None:
+        if v is not None and not v.isdigit():
+            raise ValueError("supplier_account_number must be a 10-digit NUBAN")
+        return v
+
+    @field_validator("supplier_bank_code")
+    @classmethod
+    def validate_bank_code(cls, v: str | None) -> str | None:
+        if v is not None and (not v.isdigit() or len(v) not in (3, 6)):
+            raise ValueError("supplier_bank_code must be exactly 3 or 6 digits")
+        return v
+
+    @field_validator("title", "supplier_name")
+    @classmethod
+    def strip_text(cls, v: str | None) -> str | None:
+        return v.strip() if v is not None else v
 
 
 class PoolJoinRequest(BaseModel):
