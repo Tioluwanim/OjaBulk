@@ -102,6 +102,16 @@ export interface PoolJoinResponse {
   progress: number;
 }
 
+export interface PoolContributeFromSpendableResponse {
+  pool_id: string;
+  trader_id: string;
+  amount_locked: number;
+  new_spendable_balance: number;
+  pool_current_locked_amount: number;
+  pool_fulfilled: boolean;
+  message: string;
+}
+
 // ============================================================
 // Reports
 // ============================================================
@@ -145,6 +155,19 @@ export interface RecentPaymentItem {
 
 export interface RecentPaymentsResponse {
   items: RecentPaymentItem[];
+}
+
+export interface TraderPaymentResponse {
+  id: string;
+  amount_received: number;
+  nomba_transaction_ref: string;
+  pool_id: string | null;
+  received_at: string;
+  already_used_for_esusu: boolean;
+}
+
+export interface TraderPaymentsListResponse {
+  items: TraderPaymentResponse[];
 }
 
 // ============================================================
@@ -247,6 +270,10 @@ export interface EsusuContributionResult {
   cycle_completed: boolean;
   next_round_number: number | null;
   beneficiary_trader_name: string;
+}
+
+export interface EsusuContributePayload {
+  nomba_transaction_ref: string;
 }
 
 // ============================================================
