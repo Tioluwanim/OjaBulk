@@ -5,6 +5,7 @@ import type {
   EsusuListItem,
   EsusuJoinResponse,
   EsusuContributionResult,
+  EsusuContributePayload,
 } from "@/lib/types";
 
 export function listEsusuCycles() {
@@ -23,6 +24,6 @@ export function joinEsusuCycle(cycleId: string) {
   return apiClient.post<EsusuJoinResponse>(`/esusu/cycles/${cycleId}/join`);
 }
 
-export function contributeToEsusuCycle(cycleId: string) {
-  return apiClient.post<EsusuContributionResult>(`/esusu/cycles/${cycleId}/contribute`);
+export function contributeToEsusuCycle(cycleId: string, payload: EsusuContributePayload) {
+  return apiClient.post<EsusuContributionResult>(`/esusu/cycles/${cycleId}/contribute`, payload);
 }

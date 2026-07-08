@@ -19,6 +19,7 @@ import type {
   EsusuCycleCreatePayload,
   EsusuCycleResponse,
   EsusuListItem,
+  EsusuContributePayload,
 } from "@/lib/types";
 import { ArrowRight, RefreshCcw, Plus, Users, CircleDollarSign } from "lucide-react";
 
@@ -30,12 +31,20 @@ interface FormState {
   description: string;
 }
 
+interface ContributeState {
+  nomba_transaction_ref: string;
+}
+
 const initialForm: FormState = {
   title: "",
   contribution_amount: "",
   total_members: "",
   frequency_days: "7",
   description: "",
+};
+
+const initialContributeState: ContributeState = {
+  nomba_transaction_ref: "",
 };
 
 function statusLabel(status: EsusuCycleResponse["status"]) {
@@ -82,6 +91,7 @@ function EsusuContent() {
   const [cycles, setCycles] = useState<EsusuListItem[]>([]);
   const [selectedCycle, setSelectedCycle] = useState<EsusuCycleResponse | null>(null);
   const [form, setForm] = useState<FormState>(initialForm);
+  const [contributeForm, setContributeForm] = useState<ContributeState>(initialContributeState);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -186,8 +196,20 @@ function EsusuContent() {
   async function handleContribute(cycleId: string) {
     setActionBusy(`contribute:${cycleId}`);
     setError(null);
+
+    if (!contributeForm.nomba_transaction_ref.trim()) {
+      setError("Enter the Nomba transaction reference from the payment you made to your virtual account.");
+      setActionBusy(null);
+      return;
+    }
+
     try {
-      await contributeToEsusuCycle(cycleId);
+      const payload: EsusuContributePayload = {
+        nomba_transaction_ref: contributeForm.nomba_transaction_ref.trim(),
+      };
+
+      await contributeToEsusuCycle(cycleId, payload);
+      setContributeForm(initialContributeState);
       await loadCycles(cycleId);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not contribute to cycle.");
@@ -431,13 +453,25 @@ function EsusuContent() {
                   </button>
                 )}
                 {(selectedCycle.status === "active" || selectedCycle.status === "open") && isSelectedCycleMember && (
-                  <button
-                    onClick={() => handleContribute(selectedCycle.id)}
-                    disabled={actionBusy === `contribute:${selectedCycle.id}`}
-                    className="btn-gold flex-1 justify-center disabled:opacity-60"
-                  >
-                    {actionBusy === `contribute:${selectedCycle.id}` ? <Spinner className="h-5 w-5" /> : <><ArrowRight className="h-4 w-4" /> Contribute</>}
-                  </button>
+                    <div className="flex w-full flex-col gap-3 rounded-2xl border border-surface-border bg-surface p-4">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-charcoal">
+                          Nomba transaction reference
+                        </label>
+                        <Input
+                          value={contributeForm.nomba_transaction_ref}
+                          onChange={(e) => setContributeForm({ nomba_transaction_ref: e.target.value })}
+                          placeholder="Paste the transaction reference from your payment"
+                        />
+                      </div>
+                      <button
+                        onClick={() => handleContribute(selectedCycle.id)}
+                        disabled={actionBusy === `contribute:${selectedCycle.id}`}
+                        className="btn-gold justify-center disabled:opacity-60"
+                      >
+                        {actionBusy === `contribute:${selectedCycle.id}` ? <Spinner className="h-5 w-5" /> : <><ArrowRight className="h-4 w-4" /> Contribute</>}
+                      </button>
+                    </div>
                 )}
               </div>
 
