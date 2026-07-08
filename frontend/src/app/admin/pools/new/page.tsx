@@ -1,16 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Search, Check, X } from "lucide-react";
 import { RequireAdminAuth } from "@/components/admin/RequireAdminAuth";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAdminAuth } from "@/context/AdminAuthContext";
-import { createPool } from "@/lib/api/pools";
+import { createPool, listBanks, lookupAccount } from "@/lib/api/pools";
 import { ApiError } from "@/lib/api-client";
+import type { BankListItem } from "@/lib/types";
 
 interface FormState {
   title: string;
@@ -39,6 +40,65 @@ function NewPoolContent() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [banks, setBanks] = useState<BankListItem[]>([]);
+  const [banksLoading, setBanksLoading] = useState(true);
+  const [banksError, setBanksError] = useState<string | null>(null);
+  const [selectedBank, setSelectedBank] = useState<BankListItem | null>(null);
+  const [bankSearch, setBankSearch] = useState("");
+  const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
+  const bankDropdownRef = useRef<HTMLDivElement>(null);
+
+  const [verifiedAccountName, setVerifiedAccountName] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listBanks()
+      .then(setBanks)
+      .catch(() => setBanksError("Could not load bank list. You can still type a bank code manually below."))
+      .finally(() => setBanksLoading(false));
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (bankDropdownRef.current && !bankDropdownRef.current.contains(e.target as Node)) {
+        setBankDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredBanks = useMemo(() => {
+    if (!bankSearch.trim()) return banks;
+    const q = bankSearch.trim().toLowerCase();
+    return banks.filter((b) => b.name.toLowerCase().includes(q));
+  }, [banks, bankSearch]);
+
+  function selectBank(bank: BankListItem) {
+    setSelectedBank(bank);
+    update("supplier_bank_code", bank.code);
+    setBankSearch(bank.name);
+    setBankDropdownOpen(false);
+    setVerifiedAccountName(null);
+    setVerifyError(null);
+  }
+
+  async function handleVerifyAccount() {
+    if (!form.supplier_bank_code || !/^\d{10}$/.test(form.supplier_account_number)) return;
+    setVerifying(true);
+    setVerifyError(null);
+    setVerifiedAccountName(null);
+    try {
+      const result = await lookupAccount(form.supplier_account_number, form.supplier_bank_code);
+      setVerifiedAccountName(result.account_name);
+    } catch (err) {
+      setVerifyError(err instanceof ApiError ? err.message : "Could not verify this account.");
+    } finally {
+      setVerifying(false);
+    }
+  }
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
@@ -51,7 +111,7 @@ function NewPoolContent() {
     if (!/^\d{10}$/.test(form.supplier_account_number)) {
       return "Supplier account number must be exactly 10 digits (NUBAN).";
     }
-    if (form.supplier_bank_code.trim().length < 1) return "Enter the supplier's bank code.";
+    if (form.supplier_bank_code.trim().length < 1) return "Choose the supplier's bank from the dropdown.";
     if (!form.deadline_date) return "Choose a deadline date.";
     return null;
   }
@@ -175,26 +235,85 @@ function NewPoolContent() {
                     maxLength={10}
                     placeholder="0123456789"
                     value={form.supplier_account_number}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       update(
                         "supplier_account_number",
                         e.target.value.replace(/\D/g, "").slice(0, 10)
-                      )
-                    }
+                      );
+                      setVerifiedAccountName(null);
+                      setVerifyError(null);
+                    }}
+                    onBlur={handleVerifyAccount}
                   />
                 </div>
-                <div>
+                <div ref={bankDropdownRef} className="relative">
                   <label className="mb-2 block text-sm font-medium text-charcoal">
-                    Bank code
+                    Bank
                   </label>
-                  <Input
-                    type="text"
-                    placeholder="058"
-                    value={form.supplier_bank_code}
-                    onChange={(e) => update("supplier_bank_code", e.target.value)}
-                  />
+                  <div className="relative">
+                    <Input
+                      type="text"
+                      placeholder={banksLoading ? "Loading banks…" : "Search for a bank"}
+                      value={bankSearch}
+                      disabled={banksLoading}
+                      onFocus={() => setBankDropdownOpen(true)}
+                      onChange={(e) => {
+                        setBankSearch(e.target.value);
+                        setSelectedBank(null);
+                        update("supplier_bank_code", "");
+                        setBankDropdownOpen(true);
+                      }}
+                      className="pr-9"
+                    />
+                    <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-charcoal-soft/50" />
+                  </div>
+
+                  {bankDropdownOpen && !banksLoading && filteredBanks.length > 0 && (
+                    <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-surface-border bg-surface shadow-card">
+                      {filteredBanks.map((bank) => (
+                        <button
+                          key={bank.code}
+                          type="button"
+                          onClick={() => selectBank(bank)}
+                          className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-cream-dark"
+                        >
+                          <span className="text-charcoal">{bank.name}</span>
+                          {selectedBank?.code === bank.code && (
+                            <Check className="h-4 w-4 text-gold-600" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {banksError && (
+                    <p className="mt-1.5 text-xs text-danger">{banksError}</p>
+                  )}
                 </div>
               </div>
+
+              {(verifying || verifiedAccountName || verifyError) && (
+                <div
+                  className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm ${
+                    verifyError ? "bg-danger-bg text-danger" : "bg-success-bg text-success"
+                  }`}
+                >
+                  {verifying && <Spinner className="h-4 w-4" />}
+                  {verifying && "Verifying account…"}
+                  {!verifying && verifiedAccountName && (
+                    <>
+                      <Check className="h-4 w-4 shrink-0" />
+                      <span>Confirmed: {verifiedAccountName}</span>
+                    </>
+                  )}
+                  {!verifying && verifyError && (
+                    <>
+                      <X className="h-4 w-4 shrink-0" />
+                      <span>{verifyError}</span>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
