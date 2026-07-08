@@ -5,6 +5,8 @@ import type {
   PoolDetailResponse,
   PoolJoinResponse,
   PoolContributeFromSpendableResponse,
+  BankListItem,
+  AccountLookupResponse,
 } from "@/lib/types";
 
 export function listPools() {
@@ -46,4 +48,15 @@ export function contributeFromSpendable(poolId: string, amount: number) {
     `/pools/${poolId}/contribute-from-spendable`,
     { amount }
   );
+}
+
+export function listBanks() {
+  return apiClient.get<BankListItem[]>("/pools/banks");
+}
+
+export function lookupAccount(accountNumber: string, bankCode: string) {
+  return apiClient.post<AccountLookupResponse>("/pools/lookup-account", {
+    account_number: accountNumber,
+    bank_code: bankCode,
+  });
 }
