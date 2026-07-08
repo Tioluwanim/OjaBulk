@@ -6,7 +6,7 @@ import { PortalNav } from "@/components/portal/PortalNav";
 import { Spinner } from "@/components/ui/Spinner";
 import { Input } from "@/components/ui/Input";
 import { useAuth } from "@/context/AuthContext";
-import { formatNaira } from "@/lib/format";
+import { formatNaira, formatRelativeTime } from "@/lib/format";
 import { ApiError } from "@/lib/api-client";
 import {
   listEsusuCycles,
@@ -15,11 +15,13 @@ import {
   joinEsusuCycle,
   contributeToEsusuCycle,
 } from "@/lib/api/esusu";
+import { getRecentPayments } from "@/lib/api/reports";
 import type {
   EsusuCycleCreatePayload,
   EsusuCycleResponse,
   EsusuListItem,
   EsusuContributePayload,
+  RecentPaymentItem,
 } from "@/lib/types";
 import { ArrowRight, RefreshCcw, Plus, Users, CircleDollarSign } from "lucide-react";
 
@@ -94,6 +96,8 @@ function EsusuContent() {
   const [contributeForm, setContributeForm] = useState<ContributeState>(initialContributeState);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [recentPayments, setRecentPayments] = useState<RecentPaymentItem[]>([]);
+  const [loadingRecentPayments, setLoadingRecentPayments] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +108,12 @@ function EsusuContent() {
     if (!selectedCycle || !trader) return false;
     return selectedCycle.members.some((member) => member.trader_id === trader.id);
   }, [selectedCycle, trader]);
+
+  const selectedRecentPayment = useMemo(() => {
+    return recentPayments.find(
+      (payment) => payment.nomba_transaction_ref === contributeForm.nomba_transaction_ref
+    ) ?? null;
+  }, [contributeForm.nomba_transaction_ref, recentPayments]);
 
   async function loadCycles(selectId?: string) {
     setLoadingList(true);
@@ -136,8 +146,25 @@ function EsusuContent() {
     }
   }
 
+  async function loadRecentPayments() {
+    setLoadingRecentPayments(true);
+    try {
+      const data = await getRecentPayments();
+      setRecentPayments(data.items);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load recent payments.");
+    } finally {
+      setLoadingRecentPayments(false);
+    }
+  }
+
   useEffect(() => {
-    loadCycles();
+    void (async () => {
+      await Promise.all([
+        loadCycles(),
+        loadRecentPayments(),
+      ]);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -198,7 +225,7 @@ function EsusuContent() {
     setError(null);
 
     if (!contributeForm.nomba_transaction_ref.trim()) {
-      setError("Enter the Nomba transaction reference from the payment you made to your virtual account.");
+      setError("Select one of your recent payments or paste a reference from your receipt.");
       setActionBusy(null);
       return;
     }
@@ -456,14 +483,73 @@ function EsusuContent() {
                     <div className="flex w-full flex-col gap-3 rounded-2xl border border-surface-border bg-surface p-4">
                       <div>
                         <label className="mb-2 block text-sm font-medium text-charcoal">
-                          Nomba transaction reference
+                          Pick the payment you made
                         </label>
-                        <Input
-                          value={contributeForm.nomba_transaction_ref}
-                          onChange={(e) => setContributeForm({ nomba_transaction_ref: e.target.value })}
-                          placeholder="Paste the transaction reference from your payment"
-                        />
+                        <p className="text-xs text-charcoal-soft">
+                          Choose the recent transfer that funded this contribution. We will use its reference automatically.
+                        </p>
+                        <div className="mt-3 flex max-h-72 flex-col gap-2 overflow-auto pr-1">
+                          {loadingRecentPayments ? (
+                            <div className="flex items-center justify-center rounded-2xl border border-dashed border-surface-border py-8">
+                              <Spinner className="h-5 w-5 text-gold-500" />
+                            </div>
+                          ) : recentPayments.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-surface-border px-4 py-5 text-sm text-charcoal-soft">
+                              No recent payments found yet. If you already sent money, paste the reference below.
+                            </div>
+                          ) : (
+                            recentPayments.map((payment) => {
+                              const active =
+                                contributeForm.nomba_transaction_ref === payment.nomba_transaction_ref;
+
+                              return (
+                                <button
+                                  key={payment.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setContributeForm({
+                                      nomba_transaction_ref: payment.nomba_transaction_ref,
+                                    })
+                                  }
+                                  className={`rounded-2xl border px-4 py-3 text-left transition-colors ${active ? "border-gold-300 bg-gold-50/60" : "border-surface-border bg-cream-dark/30 hover:bg-cream-dark/60"}`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <p className="text-sm font-medium text-charcoal">
+                                        {formatNaira(payment.amount_received)} received
+                                      </p>
+                                      <p className="mt-0.5 text-xs text-charcoal-soft">
+                                        {payment.pool_title ? payment.pool_title : "Virtual account payment"}
+                                        {payment.received_at ? ` · ${formatRelativeTime(payment.received_at)}` : ""}
+                                      </p>
+                                    </div>
+                                    <span className="rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-charcoal-soft">
+                                      {active ? "Selected" : "Use this"}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                        <details className="mt-3 rounded-2xl border border-surface-border bg-cream-dark/20 px-4 py-3">
+                          <summary className="cursor-pointer text-sm font-medium text-charcoal">
+                            I want to paste the reference manually
+                          </summary>
+                          <div className="mt-3">
+                            <Input
+                              value={contributeForm.nomba_transaction_ref}
+                              onChange={(e) => setContributeForm({ nomba_transaction_ref: e.target.value })}
+                              placeholder="Paste the reference from your receipt"
+                            />
+                          </div>
+                        </details>
                       </div>
+                      {selectedRecentPayment && (
+                        <div className="rounded-2xl bg-gold-50 px-4 py-3 text-xs text-charcoal">
+                          Selected payment: {formatNaira(selectedRecentPayment.amount_received)} received {selectedRecentPayment.received_at ? formatRelativeTime(selectedRecentPayment.received_at) : "recently"}.
+                        </div>
+                      )}
                       <button
                         onClick={() => handleContribute(selectedCycle.id)}
                         disabled={actionBusy === `contribute:${selectedCycle.id}`}
