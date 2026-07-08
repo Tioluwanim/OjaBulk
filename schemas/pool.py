@@ -143,6 +143,21 @@ class PoolRetryPayoutResponse(BaseModel):
     message: str
 
 
+class BankListItem(BaseModel):
+    name: str
+    code: str
+
+
+class AccountLookupRequest(BaseModel):
+    account_number: str = Field(..., min_length=10, max_length=10)
+    bank_code: str = Field(..., min_length=3, max_length=6)
+
+
+class AccountLookupResponse(BaseModel):
+    account_number: str
+    account_name: str
+
+
 class ContributorResponse(BaseModel):
     """Fixed: added from_attributes=True — this schema is built per-item in a list comprehension
     in the pools router; if that construction path ever changes to pass an ORM object
