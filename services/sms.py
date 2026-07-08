@@ -1,51 +1,39 @@
 """
 services/sms.py
 
-SMS notifications via Termii.
+SMS notifications via Gideon's Technology SMS API.
 
 Supported messages (unchanged -- every call site elsewhere in the
 codebase, e.g. services/auth.py, engine/payout.py, engine/refund.py,
 engine/reconciliation.py, routers/traders.py, keeps working with zero
-changes, since these five method names/signatures are the stable
-public interface of this module):
+changes, since these method names/signatures are the stable public
+interface of this module):
 1. Virtual account created
 2. Payment received
-3. Pool fulfilled
+3. Pool fulfilled / payout processing
 4. Pool refunded
 5. Login OTP
+6. Esusu payout / payout processing
 
-WHY TERMII:
-Robase (a prior provider) sat behind Cloudflare, and server-to-server
-calls were being intercepted by a Cloudflare bot-challenge page
-(HTTP 403, HTML "Just a moment..." body, Cf-Mitigated: challenge)
-before ever reaching Robase's actual backend -- a block on Robase's
-side, not fixable from here.
-
-Termii is a solid, Nigeria-focused alternative: account creation and
-API key issuance are free (no card required, no upfront deposit) --
-you only fund the wallet when you're ready to actually send messages,
-and Nigerian SMS is priced per-message in the low-naira range, so a
-small top-up comfortably covers a hackathon demo.
+WHY GIDEON'S TECHNOLOGY:
+Every previous attempt (Robase, Termii, Africa's Talking sandbox) got
+blocked by the same wall: Nigeria's NCC requires an approved sender ID
+before an alphanumeric-branded text will actually deliver, and that
+approval can take days. Gideon's Technology's API is used here WITHOUT
+setting a custom senderId at all -- their documented success response
+shows "provider": "africastalking", meaning they're a reseller
+wrapping Africa's Talking's infrastructure, and omitting senderId
+falls through to whatever default they route through, sidestepping
+the same-day approval wait. Their dashboard also mentions free trial
+credits (trialRemaining in the response), useful for testing before
+committing spend.
 
 OTP generation and verification are handled internally by
-services/auth.py and the OTPSession table -- Termii is used ONLY as
-the SMS transport layer, never for OTP logic itself.
+services/auth.py and the OTPSession table -- this file is used ONLY
+as the SMS transport layer, never for OTP logic itself.
 
 ENV VARS REQUIRED (already present in core/config.py):
-    TERMII_API_KEY  - from your Termii dashboard (Settings > API)
-    SMS_SENDER_ID   - optional. Termii's /sms/send endpoint always
-                       requires a "from" value in the payload -- there
-                       is no way to omit it entirely (checked their
-                       docs; every documented example includes one).
-                       A custom brand name like "OjaBulk" needs
-                       Termii's approval first (can take ~a day), so
-                       this defaults to "Termii" -- their own platform
-                       default, used directly in Termii's own docs
-                       examples -- which works immediately with no
-                       registration/approval step. Set SMS_SENDER_ID
-                       to your own approved name later once it clears
-                       review; nothing else in this file needs to
-                       change.
+    GIDEONS_SMS_API_KEY - from your Gideons Technology dashboard
 """
 
 import requests
@@ -55,12 +43,10 @@ from core.config import settings
 
 class SMSService:
 
-    BASE_URL = "https://v3.api.termii.com/api/sms/send"
-    DEFAULT_SENDER_ID = "Termii"
+    BASE_URL = "https://gideonstechnology.com/api/customer/sms/send"
 
     def __init__(self):
-        self.api_key = settings.TERMII_API_KEY
-        self.sender_id = settings.SMS_SENDER_ID or self.DEFAULT_SENDER_ID
+        self.api_key = settings.GIDEONS_SMS_API_KEY
 
     # ==========================================================
     # Phone normalization
@@ -68,23 +54,23 @@ class SMSService:
 
     def _normalize_phone(self, phone: str) -> str:
         """
-        Converts Nigerian numbers to the format Termii expects:
-        234XXXXXXXXXX (no leading +, no leading 0).
+        Converts Nigerian numbers to E.164 format (+234XXXXXXXXXX),
+        which is what Gideon's Technology's API expects for `to`.
 
         Examples:
-            08012345678     -> 2348012345678
-            2348012345678   -> 2348012345678
-            +2348012345678  -> 2348012345678
+            08012345678     -> +2348012345678
+            2348012345678   -> +2348012345678
+            +2348012345678  -> +2348012345678
         """
         phone = phone.strip().replace(" ", "").replace("-", "")
 
         if phone.startswith("+234"):
-            return phone[1:]
-        if phone.startswith("234"):
             return phone
+        if phone.startswith("234"):
+            return f"+{phone}"
         if phone.startswith("0"):
-            return f"234{phone[1:]}"
-        return f"234{phone}"
+            return f"+234{phone[1:]}"
+        return f"+234{phone}"
 
     # ==========================================================
     # Send
@@ -92,10 +78,10 @@ class SMSService:
 
     def _send_sms(self, phone: str, message: str) -> bool:
         """
-        Sends SMS via Termii's /sms/send endpoint.
+        Sends SMS via Gideon's Technology's /sms/send endpoint.
 
         Returns:
-            True if Termii accepted and actually queued the message
+            True if the API reports success: true
             False otherwise
 
         Never raises -- SMS failure must never crash a request (see
@@ -104,71 +90,64 @@ class SMSService:
         since the underlying financial/auth action already succeeded
         by the time the SMS fires).
 
-        NOTE ON "accepted but never arrives":
-        Termii can return HTTP 200 while still rejecting the message
-        downstream (e.g. an unapproved custom Sender ID on a new
-        account). A real success always includes a message_id in the
-        response body -- a 200 with no message_id is treated as a
-        failure here, not a silent success.
+        NOTE: senderId is deliberately omitted from the payload -- see
+        this file's module docstring for why (avoids the NCC sender-ID
+        approval wait by falling through to their default routing).
         """
         if not self.api_key:
-            print("[SMS/Termii] Missing TERMII_API_KEY")
+            print("[SMS/Gideons] Missing GIDEONS_SMS_API_KEY")
             return False
 
         phone = self._normalize_phone(phone)
 
         payload = {
             "to": phone,
-            "from": self.sender_id,
-            "sms": message,
-            "type": "plain",
-            "channel": "generic",
-            "api_key": self.api_key,
+            "message": message,
         }
 
         try:
             response = requests.post(
                 self.BASE_URL,
                 headers={
+                    "X-API-Key": self.api_key,
                     "Content-Type": "application/json",
-                    "Accept": "application/json",
                 },
                 json=payload,
                 timeout=15,
             )
         except requests.exceptions.Timeout:
-            print(f"[SMS/Termii] Timeout sending to {phone}")
+            print(f"[SMS/Gideons] Timeout sending to {phone}")
             return False
         except requests.exceptions.ConnectionError as e:
-            print(f"[SMS/Termii] Connection error for {phone}: {e}")
+            print(f"[SMS/Gideons] Connection error for {phone}: {e}")
             return False
         except Exception as e:
-            print(f"[SMS/Termii] Exception for {phone}: {e}")
-            return False
-
-        if response.status_code != 200:
-            print(
-                f"[SMS/Termii] Send failed for {phone} "
-                f"[{response.status_code}]: {response.text[:300]}"
-            )
+            print(f"[SMS/Gideons] Exception for {phone}: {e}")
             return False
 
         try:
             body = response.json()
         except ValueError:
-            print(f"[SMS/Termii] Non-JSON response for {phone}: {response.text[:300]}")
+            print(f"[SMS/Gideons] Non-JSON response for {phone}: {response.text[:300]}")
             return False
 
-        if not body.get("message_id"):
+        if response.status_code != 200 or not body.get("success"):
             print(
-                f"[SMS/Termii] 200 but no message_id for {phone} -- "
-                f"treating as failed. Body: {body}"
+                f"[SMS/Gideons] Send failed for {phone} "
+                f"[{response.status_code}]: {body.get('error', body)}"
             )
+            if "balance" in body and "required" in body:
+                print(
+                    f"[SMS/Gideons] Balance too low: have {body.get('balance')}, "
+                    f"need {body.get('required')} -- top up the account."
+                )
             return False
 
         print(
-            f"[SMS/Termii] Sent to {phone} "
-            f"(message_id={body.get('message_id')}, balance={body.get('balance')})"
+            f"[SMS/Gideons] Sent to {phone} "
+            f"(messageId={body.get('messageId')}, "
+            f"balance={body.get('balance')}, "
+            f"provider={body.get('provider')})"
         )
         return True
 
@@ -348,7 +327,7 @@ sms_service = SMSService()
 if __name__ == "__main__":
     import os
 
-    print("Testing Termii SMS Service...")
+    print("Testing Gideon's Technology SMS Service...")
 
     test_phone = os.getenv("SMS_TEST_PHONE", "")
 
