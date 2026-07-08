@@ -85,6 +85,29 @@ def request_otp(db: Session, phone: str) -> None:
         # Deliberately silent — do not reveal phone is unregistered
         return
 
+    # ── DEMO INTERCEPTION ────────────────────────────────────────────────
+    # Check if this phone number is registered as a demo/judge account
+    if phone in settings.DEMO_PHONE_NUMBERS:
+        code = settings.DEMO_OTP_CODE
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.OTP_EXPIRY_MINUTES
+        )
+
+        otp_session = OTPSession(
+            id=uuid.uuid4(),
+            phone=phone,
+            code=code,
+            expires_at=expires_at,
+            used=False,
+        )
+        db.add(otp_session)
+        db.commit()
+        
+        print(f"[Auth] Demo account intercept for {phone} -- Using fixed OTP: {code}")
+        return  # Exit early so we don't generate a random code or send an SMS
+    # ─────────────────────────────────────────────────────────────────────
+
+    # Normal flow for real users
     code = _generate_otp_code()
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=settings.OTP_EXPIRY_MINUTES
@@ -285,7 +308,7 @@ def get_current_identity_optional(
     that are PUBLIC by default but behave differently when a caller
     happens to be logged in (e.g. GET /pools, which is open to
     everyone, but supports an authenticated ?supplier=me filter for
-    wholesalers on top of the same public route).
+    wholesaler on top of the same public route).
 
     A malformed or expired token still raises 401 here, same as the
     non-optional version — "no token" and "bad token" are different
