@@ -112,6 +112,16 @@ export interface PoolContributeFromSpendableResponse {
   message: string;
 }
 
+export interface BankListItem {
+  name: string;
+  code: string;
+}
+
+export interface AccountLookupResponse {
+  account_number: string;
+  account_name: string;
+}
+
 // ============================================================
 // Reports
 // ============================================================
