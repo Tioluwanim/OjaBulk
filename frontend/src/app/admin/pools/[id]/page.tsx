@@ -9,6 +9,7 @@ import { PoolStatusBadge } from "@/components/admin/PoolStatusBadge";
 import { CircularProgress } from "@/components/admin/CircularProgress";
 import { Spinner } from "@/components/ui/Spinner";
 import { getPool } from "@/lib/api/pools";
+import { useBankName } from "@/lib/hooks/useBankName";
 import { listTraders } from "@/lib/api/traders";
 import { formatNaira, formatRelativeTime } from "@/lib/format";
 import type { PoolDetailResponse, TraderListItem } from "@/lib/types";
@@ -17,6 +18,7 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
   const [pool, setPool] = useState<PoolDetailResponse | null>(null);
   const [traderMap, setTraderMap] = useState<Record<string, TraderListItem>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const { bankName } = useBankName(pool?.supplier_bank_code);
 
   useEffect(() => {
     Promise.all([getPool(poolId), listTraders()])
@@ -107,7 +109,7 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
               </p>
               <p className="font-medium text-charcoal">{pool.supplier_name}</p>
               <p className="text-sm text-charcoal-soft">
-                {pool.supplier_account_number} &middot; {pool.supplier_bank_code}
+                {pool.supplier_account_number} &middot; {bankName}
               </p>
             </div>
           </div>
