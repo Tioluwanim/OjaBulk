@@ -1,8 +1,9 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowRight, Phone, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Phone, CheckCircle2, KeyRound, Copy, Check } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 
 const winPoints = [
   "Real-time webhook → balance update, shown live",
@@ -11,6 +12,43 @@ const winPoints = [
   "Reconciliation report: our ledger vs Nomba balance",
   "Live USSD dial on a real phone — no smartphone required",
 ];
+
+// Must match DEMO_PHONE_NUMBERS / DEMO_OTP_CODE on the backend and
+// scripts/seed_demo_data.py — see services/auth.py's request_otp,
+// which checks this list before any SMS/voice delivery is attempted.
+// These are fixed so judges can log in without depending on whichever
+// SMS provider is or isn't working that day.
+const DEMO_TRADER_PHONE = "08099999001";
+const DEMO_HEAD_OF_TRADERS_PHONE = "08099999002";
+const DEMO_OTP_CODE = "000000";
+
+function CopyableField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(value);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+      className="flex w-full items-center justify-between rounded-xl bg-cream/10 px-4 py-2.5 text-left transition-colors hover:bg-cream/15"
+    >
+      <span>
+        <span className="block text-[11px] font-medium uppercase tracking-wider text-cream/50">
+          {label}
+        </span>
+        <span className="font-display text-sm font-semibold text-cream">
+          {value}
+        </span>
+      </span>
+      {copied ? (
+        <Check className="h-4 w-4 shrink-0 text-gold-400" />
+      ) : (
+        <Copy className="h-4 w-4 shrink-0 text-cream/40" />
+      )}
+    </button>
+  );
+}
 
 export function DemoCTA() {
   return (
@@ -57,6 +95,26 @@ export function DemoCTA() {
               >
                 Try USSD Demo
               </Link>
+            </div>
+
+            <div className="mt-8 rounded-xl2 border border-gold-400/20 bg-gold-400/5 p-6">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gold-500/20">
+                  <KeyRound className="h-4 w-4 text-gold-400" />
+                </div>
+                <span className="font-display font-bold text-cream">
+                  Judge demo login
+                </span>
+              </div>
+              <p className="mb-4 text-sm text-cream/60">
+                These accounts use a fixed OTP — no SMS or phone call
+                needed. Tap any field to copy.
+              </p>
+              <div className="flex flex-col gap-2">
+                <CopyableField label="Trader portal — phone" value={DEMO_TRADER_PHONE} />
+                <CopyableField label="Admin dashboard — phone" value={DEMO_HEAD_OF_TRADERS_PHONE} />
+                <CopyableField label="OTP code (both accounts)" value={DEMO_OTP_CODE} />
+              </div>
             </div>
           </motion.div>
 
