@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Input } from "@/components/ui/Input";
 import { useAuth } from "@/context/AuthContext";
 import { getPool, contributeFromSpendable } from "@/lib/api/pools";
+import { useBankName } from "@/lib/hooks/useBankName";
 import { ApiError } from "@/lib/api-client";
 import { formatNaira, formatRelativeTime } from "@/lib/format";
 import type { PoolDetailResponse } from "@/lib/types";
@@ -29,6 +30,7 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
   const [contributingFromSpendable, setContributingFromSpendable] = useState(false);
   const [spendableError, setSpendableError] = useState<string | null>(null);
   const [spendableSuccess, setSpendableSuccess] = useState<string | null>(null);
+  const { bankName } = useBankName(pool?.supplier_bank_code);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -177,7 +179,7 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
             </p>
             <p className="font-medium text-charcoal">{pool.supplier_name}</p>
             <p className="text-sm text-charcoal-soft">
-              {pool.supplier_account_number} &middot; {pool.supplier_bank_code}
+              {pool.supplier_account_number} &middot; {bankName}
             </p>
           </div>
         </div>
