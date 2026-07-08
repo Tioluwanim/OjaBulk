@@ -68,6 +68,9 @@ class TraderResponse(BaseModel):
     virtual_account_number: str | None = None
     bank_name: str | None = None
     bank_account_name: str | None = None
+    payout_bank_code: str | None = None
+    payout_account_number: str | None = None
+    payout_account_name: str | None = None
     spendable_balance: float
     total_contributed: float
     created_at: datetime | None = None
@@ -84,8 +87,20 @@ class TraderListItem(BaseModel):
     market_name: str
     virtual_account_number: str | None = None
     bank_name: str | None = None
+    payout_bank_code: str | None = None
     spendable_balance: float
     total_contributed: float
+
+
+class TraderPayoutDetailsUpdate(BaseModel):
+    payout_bank_code: str = Field(..., min_length=1, max_length=20)
+    payout_account_number: str = Field(..., min_length=6, max_length=20)
+    payout_account_name: str = Field(..., min_length=2, max_length=200)
+
+    @field_validator("payout_bank_code", "payout_account_number", "payout_account_name")
+    @classmethod
+    def strip_text(cls, v: str) -> str:
+        return v.strip()
 
 
 class LedgerEntryResponse(BaseModel):

@@ -20,6 +20,9 @@ export interface TraderResponse {
   virtual_account_number: string | null;
   bank_name: string | null;
   bank_account_name: string | null;
+  payout_bank_code: string | null;
+  payout_account_number: string | null;
+  payout_account_name: string | null;
   spendable_balance: number;
   total_contributed: number;
   created_at: string | null;
@@ -33,8 +36,15 @@ export interface TraderListItem {
   market_name: string;
   virtual_account_number: string | null;
   bank_name: string | null;
+  payout_bank_code: string | null;
   spendable_balance: number;
   total_contributed: number;
+}
+
+export interface TraderPayoutDetailsUpdatePayload {
+  payout_bank_code: string;
+  payout_account_number: string;
+  payout_account_name: string;
 }
 
 export type LedgerEntryType =

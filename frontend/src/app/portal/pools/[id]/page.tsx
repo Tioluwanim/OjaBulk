@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
@@ -46,7 +46,7 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
   }, [poolId]);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   async function handleContributeFromSpendable() {
@@ -126,7 +126,7 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
       {pool.status === "fulfilled" && (
         <div className="mt-6 rounded-xl2 bg-success-bg p-5">
           <p className="font-medium text-success">
-            This pool reached its target — payment was sent to {pool.supplier_name}
+            This pool reached its target â€” payment was sent to {pool.supplier_name}
             {pool.fulfilled_at ? ` on ${new Date(pool.fulfilled_at).toLocaleDateString()}` : ""}.
           </p>
         </div>
@@ -215,7 +215,7 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
             Contribute
           </p>
           <p className="mt-1 text-sm text-charcoal-soft">
-            Send money to your OjaBulk virtual account below — it locks toward this
+            Send money to your OjaBulk virtual account below â€” it locks toward this
             pool automatically.
           </p>
           <div className="mt-3 flex items-center justify-between rounded-xl bg-cream-dark px-4 py-3">
@@ -247,7 +247,7 @@ function PoolDetailContent({ poolId }: { poolId: string }) {
           </div>
           <p className="mt-1 text-sm text-charcoal-soft">
             You have {formatNaira(trader.spendable_balance)} sitting in your
-            OjaBulk wallet — lock some of it into this pool instead of
+            OjaBulk wallet â€” lock some of it into this pool instead of
             sending a new bank transfer.
           </p>
 

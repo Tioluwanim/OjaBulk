@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   createContext,
@@ -41,15 +41,19 @@ export function AdminAuthProvider({
   const router = useRouter();
 
   useEffect(() => {
-    const token = localStorage.getItem(ADMIN_TOKEN_KEY);
-    const name = localStorage.getItem(ADMIN_NAME_KEY);
-    if (token && name) {
-      setSession({
-        displayName: name,
-        marketName: localStorage.getItem(ADMIN_MARKET_KEY),
-      });
-    }
-    setIsLoading(false);
+    const timeoutId = window.setTimeout(() => {
+      const token = localStorage.getItem(ADMIN_TOKEN_KEY);
+      const name = localStorage.getItem(ADMIN_NAME_KEY);
+      if (token && name) {
+        setSession({
+          displayName: name,
+          marketName: localStorage.getItem(ADMIN_MARKET_KEY),
+        });
+      }
+      setIsLoading(false);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   const login = useCallback(

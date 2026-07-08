@@ -1,4 +1,4 @@
-import type { ApiErrorBody } from "./types";
+﻿import type { ApiErrorBody } from "./types";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -30,7 +30,7 @@ class ApiError extends Error {
 }
 
 interface RequestOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   auth?: boolean;
   tokenOverride?: string | null; // use this token instead of the default trader token
@@ -77,6 +77,8 @@ export const apiClient = {
     request<T>(path, { ...opts, method: "GET" }),
   post: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
     request<T>(path, { ...opts, method: "POST", body }),
+  put: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
+    request<T>(path, { ...opts, method: "PUT", body }),
   patch: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
     request<T>(path, { ...opts, method: "PATCH", body }),
   delete: <T>(path: string, opts?: RequestOptions) =>

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   BarChart,
@@ -21,7 +21,7 @@ export function PoolProgressChart({ pools }: PoolProgressChartProps) {
     .filter((p) => p.status === "open")
     .slice(0, 6)
     .map((p) => ({
-      name: p.title.length > 16 ? p.title.slice(0, 16) + "…" : p.title,
+      name: p.title.length > 16 ? p.title.slice(0, 16) + "â€¦" : p.title,
       locked: p.current_locked_amount,
       remaining: Math.max(p.target_amount - p.current_locked_amount, 0),
       target: p.target_amount,
@@ -49,10 +49,10 @@ export function PoolProgressChart({ pools }: PoolProgressChartProps) {
           tick={{ fontSize: 11, fill: "#3A362E" }}
           axisLine={false}
           tickLine={false}
-          tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`}
+          tickFormatter={(v) => `â‚¦${(v / 1000).toFixed(0)}k`}
         />
         <Tooltip
-          formatter={(value: any, name: any) => [
+          formatter={(value: unknown, name: unknown) => [
             formatNaira(typeof value === 'number' ? value : 0),
             name === "locked" ? "Locked" : "Remaining",
           ]}

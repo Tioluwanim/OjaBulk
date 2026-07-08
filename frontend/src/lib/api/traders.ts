@@ -4,7 +4,7 @@ import type {
   TraderLedgerResponse,
   PoolResponse,
 } from "@/lib/types";
-import type { TraderListItem } from "@/lib/types";
+import type { TraderListItem, TraderPayoutDetailsUpdatePayload } from "@/lib/types";
 import { getAdminToken } from "@/context/AdminAuthContext";
 export interface RegisterTraderPayload {
   name: string;
@@ -29,6 +29,10 @@ export function getMyLedger() {
 
 export function getMyPools() {
   return apiClient.get<PoolResponse[]>("/traders/me/pools");
+}
+
+export function updateMyPayoutDetails(payload: TraderPayoutDetailsUpdatePayload) {
+  return apiClient.put<TraderResponse>("/traders/me/payout-details", payload);
 }
 
 

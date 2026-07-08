@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { CheckCircle2, XCircle, AlertTriangle, RefreshCcw } from "lucide-react";
@@ -24,7 +24,7 @@ function ReconciliationContent() {
   }
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(load);
   }, []);
 
   if (isLoading || !data) {
@@ -76,7 +76,7 @@ function ReconciliationContent() {
         </div>
       ) : (
         <>
-          {/* The two big numbers — the differentiator screen */}
+          {/* The two big numbers â€” the differentiator screen */}
           <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2">
             <div className="card-surface p-8 text-center">
               <span className="text-xs font-medium uppercase tracking-wider text-charcoal-soft">
@@ -96,7 +96,7 @@ function ReconciliationContent() {
                 Nomba Account Balance
               </span>
               <p className="mt-3 font-display text-4xl font-bold text-charcoal">
-                {data.nomba_balance !== null ? formatNaira(data.nomba_balance) : "—"}
+                {data.nomba_balance !== null ? formatNaira(data.nomba_balance) : "â€”"}
               </p>
               <p className="mt-2 text-xs text-charcoal-soft">
                 {data.currency ?? "NGN"} &middot; checked{" "}

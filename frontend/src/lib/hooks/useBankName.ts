@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { listBanks } from "@/lib/api/pools";
 import type { BankListItem } from "@/lib/types";
 
@@ -40,11 +40,7 @@ export function useBankName(bankCode: string | null | undefined): {
   const [isLoading, setIsLoading] = useState(!cachedBanks);
 
   useEffect(() => {
-    if (cachedBanks) {
-      setBanks(cachedBanks);
-      setIsLoading(false);
-      return;
-    }
+    if (cachedBanks) return;
     let cancelled = false;
     getBanks()
       .then((result) => {

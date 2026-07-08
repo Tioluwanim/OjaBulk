@@ -1,24 +1,25 @@
+﻿import Link from "next/link";
 import { RegisterFlow } from "@/components/portal/RegisterFlow";
 import { Users, MapPin, Sparkles } from "lucide-react";
 
 export default function RegisterPage() {
   return (
     <main className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
-      {/* Left — brand panel */}
+      {/* Left â€” brand panel */}
       <div className="relative hidden flex-col justify-between overflow-hidden bg-charcoal p-12 lg:flex">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-20 left-1/4 h-[400px] w-[400px] rounded-full bg-gold-900/40 blur-3xl" />
           <div className="absolute bottom-0 right-0 h-[300px] w-[300px] rounded-full bg-gold-800/30 blur-3xl" />
         </div>
 
-        <a href="/" className="relative flex items-center gap-2">
+        <Link href="/" className="relative flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gold-500 font-display text-lg font-bold text-cream">
             O
           </div>
           <span className="font-display text-xl font-bold text-cream">
             Oja<span className="text-gold-400">Bulk</span>
           </span>
-        </a>
+        </Link>
 
         <div className="relative">
           <h2 className="font-display text-display-md font-bold leading-tight text-cream">
@@ -53,7 +54,7 @@ export default function RegisterPage() {
         </p>
       </div>
 
-      {/* Right — registration form */}
+      {/* Right â€” registration form */}
       <div className="flex items-center justify-center bg-cream p-8">
         <RegisterFlow />
       </div>

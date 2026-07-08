@@ -42,6 +42,7 @@ from schemas.trader import (
     TraderListItem,
     TraderLedgerResponse,
     LedgerEntryResponse,
+    TraderPayoutDetailsUpdate,
 )
 from schemas.pool import PoolResponse
 
@@ -142,6 +143,9 @@ def register_trader(
         virtual_account_number=trader.virtual_account_number,
         bank_name=trader.bank_name,
         bank_account_name=trader.bank_account_name,
+        payout_bank_code=trader.payout_bank_code,
+        payout_account_number=trader.payout_account_number,
+        payout_account_name=trader.payout_account_name,
         spendable_balance=float(trader.spendable_balance),
         total_contributed=float(trader.total_contributed),
         created_at=trader.created_at,
@@ -161,6 +165,7 @@ def list_traders(db: Session = Depends(get_db)):
             market_name=t.market_name,
             virtual_account_number=t.virtual_account_number,
             bank_name=t.bank_name,
+            payout_bank_code=t.payout_bank_code,
             spendable_balance=float(t.spendable_balance),
             total_contributed=float(t.total_contributed),
         )
@@ -216,6 +221,47 @@ def get_my_profile(
         virtual_account_number=trader.virtual_account_number,
         bank_name=trader.bank_name,
         bank_account_name=trader.bank_account_name,
+        payout_bank_code=trader.payout_bank_code,
+        payout_account_number=trader.payout_account_number,
+        payout_account_name=trader.payout_account_name,
+        spendable_balance=float(trader.spendable_balance),
+        total_contributed=float(trader.total_contributed),
+        created_at=trader.created_at,
+    )
+
+
+@router.put("/me/payout-details", response_model=TraderResponse)
+def update_my_payout_details(
+    payload: TraderPayoutDetailsUpdate,
+    identity: Identity = Depends(require_role(IdentityRole.TRADER)),
+    db: Session = Depends(get_db),
+):
+    if identity.linked_trader_id is None:
+        raise HTTPException(status_code=404, detail="This identity has no linked trader record.")
+
+    trader = db.query(Trader).filter(Trader.id == identity.linked_trader_id).first()
+    if not trader:
+        raise HTTPException(status_code=404, detail="Linked trader record not found.")
+
+    trader.payout_bank_code = payload.payout_bank_code
+    trader.payout_account_number = payload.payout_account_number
+    trader.payout_account_name = payload.payout_account_name
+
+    db.commit()
+    db.refresh(trader)
+
+    return TraderResponse(
+        id=str(trader.id),
+        name=trader.name,
+        phone=trader.phone,
+        stall_number=trader.stall_number,
+        market_name=trader.market_name,
+        virtual_account_number=trader.virtual_account_number,
+        bank_name=trader.bank_name,
+        bank_account_name=trader.bank_account_name,
+        payout_bank_code=trader.payout_bank_code,
+        payout_account_number=trader.payout_account_number,
+        payout_account_name=trader.payout_account_name,
         spendable_balance=float(trader.spendable_balance),
         total_contributed=float(trader.total_contributed),
         created_at=trader.created_at,

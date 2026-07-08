@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useCallback } from "react";
 import { RequireAuth } from "@/components/portal/RequireAuth";
@@ -24,7 +24,7 @@ function PoolsContent() {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   if (!trader || isLoading) {

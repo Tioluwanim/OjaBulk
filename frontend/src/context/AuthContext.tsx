@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   createContext,
@@ -45,12 +45,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const token = getStoredToken();
-    if (token) {
-      loadProfile();
-    } else {
-      setIsLoading(false);
-    }
+    const timeoutId = window.setTimeout(() => {
+      const token = getStoredToken();
+      if (token) {
+        void loadProfile();
+      } else {
+        setIsLoading(false);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [loadProfile]);
 
   const login = useCallback(
