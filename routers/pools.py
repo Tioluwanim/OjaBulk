@@ -29,6 +29,7 @@ from models.ledger_entry import LedgerEntry, EntryType
 from engine.refund import refund_pool
 from engine.payout import trigger_payout
 from services.auth import require_role, get_current_identity, get_current_identity_optional
+from services.transfers import transfer_service
 from routers.auth import verify_admin_key
 from schemas.pool import (
     PoolCreate,
@@ -40,6 +41,9 @@ from schemas.pool import (
     PoolContributeFromSpendableRequest,
     PoolContributeFromSpendableResponse,
     PoolRetryPayoutResponse,
+    BankListItem,
+    AccountLookupRequest,
+    AccountLookupResponse,
     ContributorResponse,
     WholesalerConfirmResponse,
 )
@@ -155,6 +159,75 @@ def list_pools(
         .all()
     )
     return [_pool_response(p) for p in pools]
+
+
+@router.get("/banks", response_model=list[BankListItem])
+def list_banks():
+    """
+    GET /pools/banks
+
+    Real gap this closes: supplier_bank_code was a raw text input on
+    the pool-creation form — an admin had to already know (or go look
+    up) the correct numeric code for a bank, which is exactly how a
+    malformed code (wrong digit count) slipped into a pool and only
+    surfaced when Nomba's Transfer API rejected the payout, possibly
+    days later. Exposes services/transfers.py's get_banks() so the
+    frontend can render a searchable "pick your bank" dropdown instead
+    — the code is then supplied by the system, never typed by hand.
+
+    Declared BEFORE GET /{pool_id} so "/pools/banks" isn't swallowed
+    by the {pool_id} path parameter.
+    """
+    try:
+        banks = transfer_service.get_banks()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch bank list: {e}")
+
+    return [
+        BankListItem(
+            name=b.get("name", ""),
+            code=b.get("code", ""),
+        )
+        for b in banks
+        if b.get("name") and b.get("code")
+    ]
+
+
+@router.post("/lookup-account", response_model=AccountLookupResponse)
+def lookup_account(payload: AccountLookupRequest):
+    """
+    POST /pools/lookup-account
+
+    Pairs with the bank-picker dropdown: once an admin has picked a
+    bank and typed an account number, this calls
+    transfer_service.lookup_account() to resolve and return the real
+    account holder's name from Nomba — so the admin can visually
+    confirm "yes, this is actually Kayode Rice Distributors" before
+    the pool is created, catching a wrong account number or bank
+    mismatch before any money is ever at stake, not after a payout
+    fails.
+
+    Declared BEFORE GET /{pool_id} for the same routing reason as
+    /banks above.
+    """
+    try:
+        result = transfer_service.lookup_account(
+            account_number=payload.account_number,
+            bank_code=payload.bank_code,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Account lookup failed: {e}")
+
+    if not result.get("account_name"):
+        raise HTTPException(
+            status_code=422,
+            detail="Could not verify this account — check the account number and bank.",
+        )
+
+    return AccountLookupResponse(
+        account_number=result["account_number"],
+        account_name=result["account_name"],
+    )
 
 
 @router.get("/{pool_id}", response_model=PoolDetailResponse)
