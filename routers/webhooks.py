@@ -26,6 +26,15 @@ from engine.reconciliation import (
 router = APIRouter()
 
 
+def _get_header_value(headers, *names: str) -> str:
+    for name in names:
+        value = headers.get(name, "")
+        if value:
+            return value
+
+    return ""
+
+
 @router.post("/nomba")
 async def receive_nomba_webhook(
     request: Request,
@@ -47,8 +56,16 @@ async def receive_nomba_webhook(
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     # Step 3 — Verify HMAC signature
-    signature = request.headers.get("nomba-signature", "")
-    timestamp = request.headers.get("nomba-timestamp", "")
+    signature = _get_header_value(
+        request.headers,
+        "nomba-signature",
+        "x-nomba-signature",
+    )
+    timestamp = _get_header_value(
+        request.headers,
+        "nomba-timestamp",
+        "x-nomba-timestamp",
+    )
     
     try:
         webhook_service.verify(

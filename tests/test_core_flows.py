@@ -1,9 +1,12 @@
 import asyncio
+import base64
+import hashlib
 import importlib
 import json
 import os
 import sys
 import tempfile
+import hmac
 import unittest
 from pathlib import Path
 from datetime import datetime, timezone
@@ -236,6 +239,68 @@ class CoreFlowTests(unittest.TestCase):
             self.assertEqual(result["note"], "duplicate transaction ignored")
         finally:
             session.close()
+
+    def test_nomba_webhook_signature_uses_base64_hmac(self):
+        os.environ["NOMBA_WEBHOOK_SECRET"] = "sampleSecret"
+        webhook_service_module = importlib.import_module("services.webhooks")
+        service = webhook_service_module.NombaWebhookService()
+
+        payload = {
+            "event_type": "payment_success",
+            "requestId": "45f2dc2d-d559-4773-bba3-2d5ec17b2e20",
+            "data": {
+                "merchant": {
+                    "walletId": "6756ff80aafe04a795f18b38",
+                    "userId": "b7b10e81-e57d-41d0-8fdc-f4e23a132bbf",
+                },
+                "transaction": {
+                    "transactionId": "API-VACT_TRA-B7B10-0435b274-807a-4bc7-8abe-9dbb4548fd7a",
+                    "type": "vact_transfer",
+                    "time": "2025-09-29T10:51:44Z",
+                    "responseCode": "",
+                },
+            },
+        }
+        timestamp = "2025-09-29T10:51:44Z"
+
+        hashing_payload = (
+            "payment_success:"
+            "45f2dc2d-d559-4773-bba3-2d5ec17b2e20:"
+            "b7b10e81-e57d-41d0-8fdc-f4e23a132bbf:"
+            "6756ff80aafe04a795f18b38:"
+            "API-VACT_TRA-B7B10-0435b274-807a-4bc7-8abe-9dbb4548fd7a:"
+            "vact_transfer:"
+            "2025-09-29T10:51:44Z:"
+            ":"
+            "2025-09-29T10:51:44Z"
+        )
+        expected_signature = base64.b64encode(
+            hmac.new(
+                b"sampleSecret",
+                hashing_payload.encode("utf-8"),
+                hashlib.sha256,
+            ).digest()
+        ).decode("utf-8")
+
+        self.assertEqual(service._generate_signature(payload, timestamp), expected_signature)
+
+    def test_webhook_header_fallback_accepts_x_prefixed_names(self):
+        self.assertEqual(
+            self.webhooks_router._get_header_value(
+                {"x-nomba-signature": "sig", "x-nomba-timestamp": "ts"},
+                "nomba-signature",
+                "x-nomba-signature",
+            ),
+            "sig",
+        )
+        self.assertEqual(
+            self.webhooks_router._get_header_value(
+                {"nomba-signature": "sig", "x-nomba-signature": "fallback"},
+                "nomba-signature",
+                "x-nomba-signature",
+            ),
+            "sig",
+        )
 
     def test_payout_persists_transfer_and_fulfilled_state(self):
         session = self._session()

@@ -2,6 +2,7 @@ import os
 import json
 import hmac
 import hashlib
+import base64
 
 from typing import Tuple
 
@@ -97,9 +98,17 @@ class NombaWebhookService:
             self._get_secret().encode(),
             hashing_payload.encode(),
             hashlib.sha256,
-        ).hexdigest()
+        ).digest()
 
-        return digest
+        return base64.b64encode(digest).decode("utf-8")
+
+    def _get_header_value(self, headers, *names: str) -> str:
+        for name in names:
+            value = headers.get(name, "")
+            if value:
+                return value
+
+        return ""
 
     def verify(
         self,
@@ -253,18 +262,16 @@ async def get_raw_body_and_verify(
             detail="Invalid JSON payload",
         )
 
-    signature = (
-        request.headers.get(
-            "nomba-signature",
-            ""
-        )
+    signature = webhook_service._get_header_value(
+        request.headers,
+        "nomba-signature",
+        "x-nomba-signature",
     )
 
-    timestamp = (
-        request.headers.get(
-            "nomba-timestamp",
-            ""
-        )
+    timestamp = webhook_service._get_header_value(
+        request.headers,
+        "nomba-timestamp",
+        "x-nomba-timestamp",
     )
 
     try:
