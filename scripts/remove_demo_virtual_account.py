@@ -1,3 +1,4 @@
+import argparse
 import sys
 from pathlib import Path
 
@@ -8,10 +9,25 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.config import settings
 from core.database import SessionLocal
-from models import Trader, Identity, IdentityRole
+from models import (
+    Trader,
+    Identity,
+    IdentityRole,
+    Payment,
+    LedgerEntry,
+    PoolContribution,
+    EsusuContribution,
+    EsusuMember,
+)
 
 
-def _resolve_demo_traders(db) -> list[Trader]:
+def _selected_demo_phones(phone: str | None = None) -> list[str]:
+    if phone:
+        return [phone]
+    return list(settings.DEMO_PHONE_NUMBERS)
+
+
+def _resolve_demo_traders(db, phone_numbers: list[str]) -> list[Trader]:
     """
     Resolve demo trader rows from the configured demo phone numbers.
 
@@ -21,7 +37,7 @@ def _resolve_demo_traders(db) -> list[Trader]:
     """
     resolved: dict[str, Trader] = {}
 
-    for phone in settings.DEMO_PHONE_NUMBERS:
+    for phone in phone_numbers:
         trader = db.query(Trader).filter(Trader.phone == phone).first()
         if trader:
             resolved[str(trader.id)] = trader
@@ -56,28 +72,75 @@ def _resolve_demo_traders(db) -> list[Trader]:
     return list(resolved.values())
 
 
-def remove_demo_virtual_account() -> None:
+def _clear_demo_trader_data(db, trader: Trader) -> dict[str, int]:
+    esusu_contributions_deleted = (
+        db.query(EsusuContribution)
+        .filter(EsusuContribution.trader_id == trader.id)
+        .delete(synchronize_session=False)
+    )
+
+    esusu_members_deleted = (
+        db.query(EsusuMember)
+        .filter(EsusuMember.trader_id == trader.id)
+        .delete(synchronize_session=False)
+    )
+
+    pool_contributions_deleted = (
+        db.query(PoolContribution)
+        .filter(PoolContribution.trader_id == trader.id)
+        .delete(synchronize_session=False)
+    )
+
+    ledger_entries_deleted = (
+        db.query(LedgerEntry)
+        .filter(LedgerEntry.trader_id == trader.id)
+        .delete(synchronize_session=False)
+    )
+
+    payments_deleted = (
+        db.query(Payment)
+        .filter(Payment.trader_id == trader.id)
+        .delete(synchronize_session=False)
+    )
+
+    trader.spendable_balance = 0
+    trader.total_contributed = 0
+
+    return {
+        "esusu_contributions": esusu_contributions_deleted,
+        "esusu_members": esusu_members_deleted,
+        "pool_contributions": pool_contributions_deleted,
+        "ledger_entries": ledger_entries_deleted,
+        "payments": payments_deleted,
+    }
+
+
+def clear_demo_trader_data(phone: str | None = None) -> None:
     db = SessionLocal()
     try:
-        print(f"Clearing stored virtual account details for demo users: {settings.DEMO_PHONE_NUMBERS}")
+        phone_numbers = _selected_demo_phones(phone)
+        print(f"Clearing demo trader data for phones: {phone_numbers}")
 
-        traders = _resolve_demo_traders(db)
+        traders = _resolve_demo_traders(db, phone_numbers)
 
         if not traders:
             print("No demo traders found in database.")
             return
 
         for trader in traders:
-            if trader.virtual_account_number or trader.bank_name or trader.bank_account_name:
-                print(f"Clearing virtual account data for {trader.phone} (trader ID: {trader.id})")
-                trader.virtual_account_number = None
-                trader.bank_name = None
-                trader.bank_account_name = None
-            else:
-                print(f"No stored virtual account data for {trader.phone}")
+            print(f"Clearing demo history for {trader.phone} (trader ID: {trader.id})")
+            counts = _clear_demo_trader_data(db, trader)
+            print(
+                "Deleted rows: "
+                f"payments={counts['payments']}, "
+                f"ledger_entries={counts['ledger_entries']}, "
+                f"pool_contributions={counts['pool_contributions']}, "
+                f"esusu_members={counts['esusu_members']}, "
+                f"esusu_contributions={counts['esusu_contributions']}"
+            )
 
         db.commit()
-        print("Cleanup complete. The demo trader will need fresh provisioning before showing a real account.")
+        print("Cleanup complete. Real virtual account details were preserved.")
 
     except Exception as e:
         db.rollback()
@@ -86,5 +149,17 @@ def remove_demo_virtual_account() -> None:
         db.close()
 
 
+def remove_demo_virtual_account() -> None:
+    clear_demo_trader_data()
+
+
 if __name__ == "__main__":
-    remove_demo_virtual_account()
+    parser = argparse.ArgumentParser(
+        description="Clear fake demo trader data while preserving the real virtual account."
+    )
+    parser.add_argument(
+        "--phone",
+        help="Optional demo trader phone number to clean up instead of all configured demo phones.",
+    )
+    args = parser.parse_args()
+    clear_demo_trader_data(phone=args.phone)

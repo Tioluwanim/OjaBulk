@@ -90,9 +90,9 @@ class SMSService:
         since the underlying financial/auth action already succeeded
         by the time the SMS fires).
 
-        NOTE: senderId is deliberately omitted from the payload -- see
-        this file's module docstring for why (avoids the NCC sender-ID
-        approval wait by falling through to their default routing).
+        NOTE: senderId is included when configured because Gideons'
+        docs show it as part of the supported request body and the
+        account may require an approved sender label for delivery.
         """
         if not self.api_key:
             print("[SMS/Gideons] Missing GIDEONS_SMS_API_KEY")
@@ -104,6 +104,9 @@ class SMSService:
             "to": phone,
             "message": message,
         }
+
+        if settings.SMS_SENDER_ID:
+            payload["senderId"] = settings.SMS_SENDER_ID
 
         try:
             response = requests.post(

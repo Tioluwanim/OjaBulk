@@ -53,9 +53,9 @@ These values are also used by the frontend landing page and backend OTP intercep
 
 ## Demo virtual account utilities
 
-The demo trader account is the trader at `08099999001`. The fake demo virtual account is stored on the trader row itself, not in a separate table.
+The demo trader account is the trader at `08099999001`.
 
-Clear the stored demo virtual account fields:
+Clear demo-only trader history while keeping the real virtual account details in place:
 
 ```bash
 python scripts/remove_demo_virtual_account.py
@@ -88,5 +88,6 @@ Useful demo/auth values:
 ## Notes
 
 - The trader model keeps `virtual_account_number`, `bank_name`, and `bank_account_name` directly on the trader row.
+- The cleanup script deletes demo trader payments, ledger entries, pool contributions, and esusu rows, then resets the cached balances on that trader.
 - OTP login for demo accounts bypasses SMS delivery and uses the fixed demo code.
 - The backend and frontend are meant to run together for the full demo flow.
