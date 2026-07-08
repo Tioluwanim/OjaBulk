@@ -45,6 +45,41 @@ class Settings:
 
     TERMII_API_KEY = os.getenv("TERMII_API_KEY", "")
 
+    GIDEONS_SMS_API_KEY = os.getenv("GIDEONS_SMS_API_KEY", "")
+
+    # "sms" (default) sends a text via services/sms.py's active provider.
+    # "voice" uses Termii's Voice Token API instead -- a phone CALL that
+    # reads out the OTP digits. Real reason this exists: Termii's (and
+    # every Nigerian SMS provider's) text-SMS endpoint requires an
+    # NCC-approved sender ID, which can take days to clear. Termii's
+    # voice OTP endpoint takes no sender ID at all -- see
+    # services/voice_otp.py -- so it works immediately with the same
+    # TERMII_API_KEY, no approval wait. Trade-off: the OTP is spoken
+    # aloud during a phone call rather than texted, and Termii
+    # generates/verifies the code itself rather than OjaBulk's own
+    # OTPSession comparison (see services/auth.py).
+    OTP_DELIVERY_CHANNEL = os.getenv("OTP_DELIVERY_CHANNEL", "sms")
+
+    # Judging/demo accounts: any phone number listed here always gets
+    # the SAME fixed OTP code (DEMO_OTP_CODE) instead of a random one,
+    # and no SMS/voice delivery is even attempted for it -- so judges
+    # can log in reliably without depending on whichever SMS provider
+    # is or isn't working that day. Comma-separated, e.g.
+    # "2348010000001,2348010000002". Leave empty to disable entirely.
+    # SECURITY NOTE: this is a deliberate, temporary bypass for
+    # judging purposes. Anyone who knows a demo phone number and the
+    # fixed code can log in as that account -- keep the demo list
+    # small, use throwaway seeded accounts (not a real trader's own
+    # number), and remove these env vars after judging.
+    DEMO_PHONE_NUMBERS = [
+        p.strip() for p in os.getenv("DEMO_PHONE_NUMBERS", "").split(",") if p.strip()
+    ]
+    DEMO_OTP_CODE = os.getenv("DEMO_OTP_CODE", "000000")
+
+    TWILIO_ACCOUNT_SID  = os.getenv("TWILIO_ACCOUNT_SID", "")
+    TWILIO_AUTH_TOKEN   = os.getenv("TWILIO_AUTH_TOKEN", "")
+    TWILIO_FROM_NUMBER  = os.getenv("TWILIO_FROM_NUMBER", "")
+
     # ── USSD ─────────────────────────────────────────────────────────────
     AFRICAS_TALKING_API_KEY   = os.getenv("AFRICAS_TALKING_API_KEY", "")
     AFRICAS_TALKING_USERNAME  = os.getenv("AFRICAS_TALKING_USERNAME", "")
