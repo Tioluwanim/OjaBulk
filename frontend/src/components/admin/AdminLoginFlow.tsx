@@ -54,7 +54,11 @@ export function AdminLoginFlow() {
       login(result);
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Invalid code or access denied."
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Invalid code or access denied."
       );
       setIsSubmitting(false);
     }
