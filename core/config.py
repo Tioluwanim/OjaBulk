@@ -50,15 +50,6 @@ class Settings:
     SENDCHAMP_API_KEY = os.getenv("SENDCHAMP_API_KEY", "")
     SENDCHAMP_ROUTE = os.getenv("SENDCHAMP_ROUTE", "non_dnd")
 
-    # "sms" (default) sends a text via services/sms.py's active provider.
-    # "voice" uses Termii's Voice Token API instead -- a phone CALL that
-    # reads out the OTP digits. "twilio_verify" uses Twilio's Verify
-    # API -- Twilio generates, delivers (SMS by default), and checks
-    # the code itself, offloading that logic entirely instead of
-    # OjaBulk's own OTPSession comparison. See services/voice_otp.py
-    # and services/twilio_verify.py.
-    OTP_DELIVERY_CHANNEL = os.getenv("OTP_DELIVERY_CHANNEL", "sms")
-
     # Judging/demo accounts: any phone number listed here always gets
     # the SAME fixed OTP code (DEMO_OTP_CODE) instead of a random one,
     # and no SMS/voice delivery is even attempted for it -- so judges
@@ -77,7 +68,6 @@ class Settings:
 
     TWILIO_ACCOUNT_SID  = os.getenv("TWILIO_ACCOUNT_SID", "")
     TWILIO_AUTH_TOKEN   = os.getenv("TWILIO_AUTH_TOKEN", "")
-    TWILIO_VERIFY_SERVICE_SID = os.getenv("TWILIO_VERIFY_SERVICE_SID", "")
     TWILIO_FROM_NUMBER  = os.getenv("TWILIO_FROM_NUMBER", "")
 
     # ── USSD ─────────────────────────────────────────────────────────────
