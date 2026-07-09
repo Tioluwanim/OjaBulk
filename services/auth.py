@@ -39,6 +39,8 @@ from core.config import settings
 from core.database import get_db
 from models import Identity, IdentityRole, OTPSession
 from services.sms import sms_service
+from services.voice_otp import voice_otp_service, VoiceOTPError
+from services.twilio_verify import twilio_verify_service, TwilioVerifyError
 
 
 class OTPRequestError(Exception):
@@ -85,10 +87,33 @@ def request_otp(db: Session, phone: str) -> None:
         # Deliberately silent — do not reveal phone is unregistered
         return
 
-    # ── DEMO INTERCEPTION ────────────────────────────────────────────────
-    # Check if this phone number is registered as a demo/judge account
     if phone in settings.DEMO_PHONE_NUMBERS:
+        # Judging/demo account: always the same fixed code, no
+        # SMS/voice delivery attempted at all. See core/config.py's
+        # DEMO_PHONE_NUMBERS/DEMO_OTP_CODE for why this exists and the
+        # security note on removing it after judging.
         code = settings.DEMO_OTP_CODE
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.OTP_EXPIRY_MINUTES
+        )
+        otp_session = OTPSession(
+            id=uuid.uuid4(),
+            phone=phone,
+            code=code,
+            expires_at=expires_at,
+            used=False,
+        )
+        db.add(otp_session)
+        db.commit()
+        print(f"[Auth] Demo account OTP request for {phone} — fixed code, no delivery attempted.")
+        return
+
+    if settings.OTP_DELIVERY_CHANNEL == "voice":
+        # Termii generates and owns the actual code for this channel --
+        # `code` here is a local placeholder only, never sent or
+        # compared. See services/voice_otp.py for why this channel
+        # exists: no sender ID approval needed, unlike text SMS.
+        code = _generate_otp_code()
         expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=settings.OTP_EXPIRY_MINUTES
         )
@@ -100,14 +125,63 @@ def request_otp(db: Session, phone: str) -> None:
             expires_at=expires_at,
             used=False,
         )
-        db.add(otp_session)
-        db.commit()
-        
-        print(f"[Auth] Demo account intercept for {phone} -- Using fixed OTP: {code}")
-        return  # Exit early so we don't generate a random code or send an SMS
-    # ─────────────────────────────────────────────────────────────────────
 
-    # Normal flow for real users
+        try:
+            pin_id = voice_otp_service.send(phone)
+            otp_session.external_pin_id = pin_id
+            db.add(otp_session)
+            db.commit()
+        except VoiceOTPError as e:
+            db.add(otp_session)
+            db.commit()
+            print(
+                f"[Auth] Voice OTP call failed for {phone}: {e} -- "
+                f"OTP CODE: {code} (expires {expires_at.isoformat()}) "
+                f"-- this fallback code only works if OTP_DELIVERY_CHANNEL "
+                f"is switched back to 'sms', since verify_otp checks "
+                f"external_pin_id first when it's set to 'voice'."
+            )
+        return
+
+    if settings.OTP_DELIVERY_CHANNEL == "twilio_verify":
+        # Twilio Verify generates AND delivers the code itself --
+        # nothing local to generate here. `code` is a placeholder
+        # only, same reasoning as the voice channel above.
+        code = _generate_otp_code()
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.OTP_EXPIRY_MINUTES
+        )
+
+        otp_session = OTPSession(
+            id=uuid.uuid4(),
+            phone=phone,
+            code=code,
+            expires_at=expires_at,
+            used=False,
+        )
+
+        try:
+            twilio_verify_service.send(phone)
+            # Marker, not a real external ID -- Twilio's
+            # VerificationCheck is keyed on phone number, not a
+            # returned SID, so there's nothing else to store. This
+            # just tags the session so verify_otp knows to route to
+            # Twilio's check instead of a local code comparison.
+            otp_session.external_pin_id = "twilio_verify"
+            db.add(otp_session)
+            db.commit()
+        except TwilioVerifyError as e:
+            db.add(otp_session)
+            db.commit()
+            print(
+                f"[Auth] Twilio Verify send failed for {phone}: {e} -- "
+                f"OTP CODE: {code} (expires {expires_at.isoformat()}) "
+                f"-- this fallback code only works if OTP_DELIVERY_CHANNEL "
+                f"is switched back to 'sms', since verify_otp routes to "
+                f"Twilio's check when external_pin_id is 'twilio_verify'."
+            )
+        return
+
     code = _generate_otp_code()
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=settings.OTP_EXPIRY_MINUTES
@@ -163,9 +237,34 @@ def verify_otp(db: Session, phone: str, code: str) -> dict:
         OTPVerificationError: If the code is invalid, expired, or
                               already used
     """
+    if phone in settings.DEMO_PHONE_NUMBERS:
+        # Judging/demo account: the fixed code must work every time,
+        # not just once. Real bug this fixes: the normal path below
+        # marks the OTPSession as used() after a successful verify,
+        # so the SAME fixed demo code correctly failed on a second
+        # login attempt (e.g. a judge logging in twice, or the token
+        # expiring and them logging back in) -- exactly the scenario
+        # DEMO_PHONE_NUMBERS/DEMO_OTP_CODE exists to avoid. Skips the
+        # OTPSession lookup/expiry/used-consumption entirely and just
+        # checks the code directly.
+        if code != settings.DEMO_OTP_CODE:
+            raise OTPVerificationError("Invalid or already-used OTP code.")
+
+        identity = db.query(Identity).filter(Identity.phone == phone).first()
+        if not identity:
+            raise OTPVerificationError("No identity found for this phone number.")
+
+        access_token = _issue_token(identity)
+
+        return {
+            "access_token": access_token,
+            "role": identity.role.value,
+            "display_name": identity.display_name,
+            "market_name": identity.market_name,
+        }
+
     otp_session = db.query(OTPSession).filter(
         OTPSession.phone == phone,
-        OTPSession.code == code,
         OTPSession.used == False,  # noqa: E712 — SQLAlchemy requires == here
     ).order_by(OTPSession.created_at.desc()).first()
 
@@ -183,6 +282,31 @@ def verify_otp(db: Session, phone: str, code: str) -> dict:
         raise OTPVerificationError(
             "OTP code has expired. Request a new one."
         )
+
+    if otp_session.external_pin_id == "twilio_verify":
+        try:
+            verified = twilio_verify_service.check(phone, code)
+        except TwilioVerifyError as e:
+            raise OTPVerificationError(f"Could not verify code right now: {e}")
+
+        if not verified:
+            raise OTPVerificationError("Invalid or already-used OTP code.")
+    elif otp_session.external_pin_id:
+        # Voice channel: Termii owns the actual code, not us --
+        # verify against Termii's Verify Token API instead of a local
+        # comparison. See services/voice_otp.py.
+        try:
+            verified = voice_otp_service.verify(otp_session.external_pin_id, code)
+        except VoiceOTPError as e:
+            raise OTPVerificationError(f"Could not verify code right now: {e}")
+
+        if not verified:
+            raise OTPVerificationError("Invalid or already-used OTP code.")
+    else:
+        if otp_session.code != code:
+            raise OTPVerificationError(
+                "Invalid or already-used OTP code."
+            )
 
     otp_session.used = True
 
