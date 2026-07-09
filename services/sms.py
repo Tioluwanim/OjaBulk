@@ -1,7 +1,7 @@
 """
 services/sms.py
 
-SMS notifications via Gideon's Technology SMS API.
+SMS notifications via Sendchamp.
 
 Supported messages (unchanged -- every call site elsewhere in the
 codebase, e.g. services/auth.py, engine/payout.py, engine/refund.py,
@@ -15,25 +15,33 @@ interface of this module):
 5. Login OTP
 6. Esusu payout / payout processing
 
-WHY GIDEON'S TECHNOLOGY:
-Every previous attempt (Robase, Termii, Africa's Talking sandbox) got
-blocked by the same wall: Nigeria's NCC requires an approved sender ID
-before an alphanumeric-branded text will actually deliver, and that
-approval can take days. Gideon's Technology's API is used here WITHOUT
-setting a custom senderId at all -- their documented success response
-shows "provider": "africastalking", meaning they're a reseller
-wrapping Africa's Talking's infrastructure, and omitting senderId
-falls through to whatever default they route through, sidestepping
-the same-day approval wait. Their dashboard also mentions free trial
-credits (trialRemaining in the response), useful for testing before
-committing spend.
+WHY SENDCHAMP:
+Every prior provider tried (Robase, Termii, Africa's Talking sandbox,
+Gideon's Technology) either hit Nigeria's NCC alphanumeric sender-ID
+approval wall directly, or wrapped a provider that did. Sendchamp's
+API defaults sender_name to "Sendchamp" if you haven't registered your
+own -- see their docs -- so sends work immediately without waiting on
+approval, same trade-off as every other unregistered-sender path
+(messages show "Sendchamp" as the sender instead of "OjaBulk" until a
+custom sender ID is registered and approved via their
+Create Sender ID endpoint).
+
+Docs: https://sendchamp.readme.io/reference/send-sms-api
 
 OTP generation and verification are handled internally by
-services/auth.py and the OTPSession table -- this file is used ONLY
-as the SMS transport layer, never for OTP logic itself.
+services/auth.py and the OTPSession table (or delegated to
+services/voice_otp.py / services/twilio_verify.py depending on
+OTP_DELIVERY_CHANNEL) -- this file is used ONLY as the general SMS
+transport layer for notifications, never for OTP logic itself.
 
 ENV VARS REQUIRED (already present in core/config.py):
-    GIDEONS_SMS_API_KEY - from your Gideons Technology dashboard
+    SENDCHAMP_API_KEY - Public/Access key from Sendchamp's dashboard
+                         (Account Settings > API Key/Webhook section)
+    SENDCHAMP_ROUTE   - "dnd", "non_dnd", or "international". Defaults
+                         to "non_dnd". "dnd" costs more but reaches
+                         numbers registered on Nigeria's Do-Not-Disturb
+                         list; "non_dnd" is cheaper but won't reach
+                         DND-registered numbers.
 """
 
 import requests
@@ -43,10 +51,11 @@ from core.config import settings
 
 class SMSService:
 
-    BASE_URL = "https://gideonstechnology.com/api/customer/sms/send"
+    BASE_URL = "https://api.sendchamp.com/api/v1"
 
     def __init__(self):
-        self.api_key = settings.GIDEONS_SMS_API_KEY
+        self.api_key = settings.SENDCHAMP_API_KEY
+        self.route = settings.SENDCHAMP_ROUTE or "non_dnd"
 
     # ==========================================================
     # Phone normalization
@@ -54,23 +63,23 @@ class SMSService:
 
     def _normalize_phone(self, phone: str) -> str:
         """
-        Converts Nigerian numbers to E.164 format (+234XXXXXXXXXX),
-        which is what Gideon's Technology's API expects for `to`.
+        Converts Nigerian numbers to the international format
+        Sendchamp's docs example shows (no leading +): 234XXXXXXXXXX
 
         Examples:
-            08012345678     -> +2348012345678
-            2348012345678   -> +2348012345678
-            +2348012345678  -> +2348012345678
+            08012345678     -> 2348012345678
+            2348012345678   -> 2348012345678
+            +2348012345678  -> 2348012345678
         """
         phone = phone.strip().replace(" ", "").replace("-", "")
 
         if phone.startswith("+234"):
-            return phone
+            return phone[1:]
         if phone.startswith("234"):
-            return f"+{phone}"
+            return phone
         if phone.startswith("0"):
-            return f"+234{phone[1:]}"
-        return f"+234{phone}"
+            return f"234{phone[1:]}"
+        return f"234{phone}"
 
     # ==========================================================
     # Send
@@ -78,10 +87,10 @@ class SMSService:
 
     def _send_sms(self, phone: str, message: str) -> bool:
         """
-        Sends SMS via Gideon's Technology's /sms/send endpoint.
+        Sends SMS via Sendchamp's /sms/send endpoint.
 
         Returns:
-            True if the API reports success: true
+            True if Sendchamp reports success
             False otherwise
 
         Never raises -- SMS failure must never crash a request (see
@@ -89,69 +98,54 @@ class SMSService:
         request all continue normally even if this returns False,
         since the underlying financial/auth action already succeeded
         by the time the SMS fires).
-
-        NOTE: senderId is included when configured because Gideons'
-        docs show it as part of the supported request body and the
-        account may require an approved sender label for delivery.
         """
         if not self.api_key:
-            print("[SMS/Gideons] Missing GIDEONS_SMS_API_KEY")
+            print("[SMS/Sendchamp] Missing SENDCHAMP_API_KEY")
             return False
 
         phone = self._normalize_phone(phone)
 
         payload = {
-            "to": phone,
+            "to": [phone],
             "message": message,
+            "sender_name": "Sendchamp",
+            "route": self.route,
         }
-
-        if settings.SMS_SENDER_ID:
-            payload["senderId"] = settings.SMS_SENDER_ID
 
         try:
             response = requests.post(
-                self.BASE_URL,
+                f"{self.BASE_URL}/sms/send",
                 headers={
-                    "X-API-Key": self.api_key,
+                    "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
                 json=payload,
                 timeout=15,
             )
         except requests.exceptions.Timeout:
-            print(f"[SMS/Gideons] Timeout sending to {phone}")
+            print(f"[SMS/Sendchamp] Timeout sending to {phone}")
             return False
         except requests.exceptions.ConnectionError as e:
-            print(f"[SMS/Gideons] Connection error for {phone}: {e}")
+            print(f"[SMS/Sendchamp] Connection error for {phone}: {e}")
             return False
         except Exception as e:
-            print(f"[SMS/Gideons] Exception for {phone}: {e}")
+            print(f"[SMS/Sendchamp] Exception for {phone}: {e}")
             return False
 
         try:
             body = response.json()
         except ValueError:
-            print(f"[SMS/Gideons] Non-JSON response for {phone}: {response.text[:300]}")
+            print(f"[SMS/Sendchamp] Non-JSON response for {phone}: {response.text[:300]}")
             return False
 
-        if response.status_code != 200 or not body.get("success"):
+        if response.status_code != 200:
             print(
-                f"[SMS/Gideons] Send failed for {phone} "
-                f"[{response.status_code}]: {body.get('error', body)}"
+                f"[SMS/Sendchamp] Send failed for {phone} "
+                f"[{response.status_code}]: {body.get('message', body)}"
             )
-            if "balance" in body and "required" in body:
-                print(
-                    f"[SMS/Gideons] Balance too low: have {body.get('balance')}, "
-                    f"need {body.get('required')} -- top up the account."
-                )
             return False
 
-        print(
-            f"[SMS/Gideons] Sent to {phone} "
-            f"(messageId={body.get('messageId')}, "
-            f"balance={body.get('balance')}, "
-            f"provider={body.get('provider')})"
-        )
+        print(f"[SMS/Sendchamp] Sent to {phone}: {body.get('message', body)}")
         return True
 
     # ==========================================================
@@ -330,7 +324,7 @@ sms_service = SMSService()
 if __name__ == "__main__":
     import os
 
-    print("Testing Gideon's Technology SMS Service...")
+    print("Testing Sendchamp SMS Service...")
 
     test_phone = os.getenv("SMS_TEST_PHONE", "")
 
