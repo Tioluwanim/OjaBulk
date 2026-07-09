@@ -79,7 +79,7 @@ def request_otp(db: Session, phone: str) -> None:
     """
     identity = db.query(Identity).filter(
         Identity.phone == phone
-    ).first()
+    ).order_by(Identity.created_at.desc()).first()
 
     if not identity:
         # Deliberately silent — do not reveal phone is unregistered
@@ -174,7 +174,7 @@ def verify_otp(db: Session, phone: str, code: str) -> dict:
         if code != settings.DEMO_OTP_CODE:
             raise OTPVerificationError("Invalid or already-used OTP code.")
 
-        identity = db.query(Identity).filter(Identity.phone == phone).first()
+        identity = db.query(Identity).filter(Identity.phone == phone).order_by(Identity.created_at.desc()).first()
         if not identity:
             raise OTPVerificationError("No identity found for this phone number.")
 
@@ -216,7 +216,7 @@ def verify_otp(db: Session, phone: str, code: str) -> dict:
 
     identity = db.query(Identity).filter(
         Identity.phone == phone
-    ).first()
+    ).order_by(Identity.created_at.desc()).first()
 
     if not identity:
         # Should not happen if request_otp's silent-skip is working
