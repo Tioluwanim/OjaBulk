@@ -47,17 +47,16 @@ class Settings:
 
     GIDEONS_SMS_API_KEY = os.getenv("GIDEONS_SMS_API_KEY", "")
 
+    SENDCHAMP_API_KEY = os.getenv("SENDCHAMP_API_KEY", "")
+    SENDCHAMP_ROUTE = os.getenv("SENDCHAMP_ROUTE", "non_dnd")
+
     # "sms" (default) sends a text via services/sms.py's active provider.
     # "voice" uses Termii's Voice Token API instead -- a phone CALL that
-    # reads out the OTP digits. Real reason this exists: Termii's (and
-    # every Nigerian SMS provider's) text-SMS endpoint requires an
-    # NCC-approved sender ID, which can take days to clear. Termii's
-    # voice OTP endpoint takes no sender ID at all -- see
-    # services/voice_otp.py -- so it works immediately with the same
-    # TERMII_API_KEY, no approval wait. Trade-off: the OTP is spoken
-    # aloud during a phone call rather than texted, and Termii
-    # generates/verifies the code itself rather than OjaBulk's own
-    # OTPSession comparison (see services/auth.py).
+    # reads out the OTP digits. "twilio_verify" uses Twilio's Verify
+    # API -- Twilio generates, delivers (SMS by default), and checks
+    # the code itself, offloading that logic entirely instead of
+    # OjaBulk's own OTPSession comparison. See services/voice_otp.py
+    # and services/twilio_verify.py.
     OTP_DELIVERY_CHANNEL = os.getenv("OTP_DELIVERY_CHANNEL", "sms")
 
     # Judging/demo accounts: any phone number listed here always gets
@@ -78,6 +77,7 @@ class Settings:
 
     TWILIO_ACCOUNT_SID  = os.getenv("TWILIO_ACCOUNT_SID", "")
     TWILIO_AUTH_TOKEN   = os.getenv("TWILIO_AUTH_TOKEN", "")
+    TWILIO_VERIFY_SERVICE_SID = os.getenv("TWILIO_VERIFY_SERVICE_SID", "")
     TWILIO_FROM_NUMBER  = os.getenv("TWILIO_FROM_NUMBER", "")
 
     # ── USSD ─────────────────────────────────────────────────────────────
