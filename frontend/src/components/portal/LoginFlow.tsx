@@ -82,7 +82,9 @@ export function LoginFlow() {
       setError(
         err instanceof ApiError
           ? err.message
-          : "Invalid or expired code. Please try again."
+          : err instanceof Error
+            ? err.message
+            : "Invalid or expired code. Please try again."
       );
       setIsSubmitting(false);
     }
