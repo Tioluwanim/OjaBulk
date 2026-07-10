@@ -121,8 +121,8 @@ export function UssdSimulator() {
                   animate={{ opacity: 1 }}
                   className="text-charcoal/60"
                 >
-                  Dial {SERVICE_CODE} to check your OjaBulk balance and pool
-                  status &mdash; no smartphone needed.
+                  Dial {SERVICE_CODE} to register, check your balance, join
+                  a pool, or start/join an Esusu &mdash; no smartphone needed.
                 </motion.p>
               )}
 
@@ -134,8 +134,9 @@ export function UssdSimulator() {
                   className="flex flex-col gap-2"
                 >
                   <p className="text-charcoal/70">
-                    Enter a registered trader&apos;s phone number to simulate
-                    the call:
+                    Enter any phone number to simulate the call &mdash; use a
+                    new one to try registering, or an existing trader&apos;s
+                    number to check their account:
                   </p>
                 </motion.div>
               )}
@@ -176,11 +177,17 @@ export function UssdSimulator() {
 
           {state === "active" && (
             <div className="mt-3 rounded-lg bg-[#b8c7a3] px-3 py-2">
-              <p className="min-h-[20px] font-mono text-sm text-charcoal">
-                {currentInput || (
-                  <span className="text-charcoal/40">Type your reply&hellip;</span>
-                )}
-              </p>
+              <input
+                type="text"
+                value={currentInput}
+                onChange={(e) => setCurrentInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && currentInput) sendInput();
+                }}
+                placeholder="Type your reply…"
+                autoFocus
+                className="min-h-[20px] w-full bg-transparent font-mono text-sm text-charcoal outline-none placeholder:text-charcoal/40"
+              />
             </div>
           )}
         </div>
