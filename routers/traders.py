@@ -32,8 +32,11 @@ from models.trader import Trader
 from models.ledger_entry import LedgerEntry
 from models.pool_contribution import PoolContribution
 from models.pool import Pool, PoolStatus
+from models.payment import Payment
+from models.esusu import EsusuContribution
 from models.identity import Identity, IdentityRole
 from services.virtual_accounts import virtual_account_service
+from services.trader_registration import register_trader as register_trader_service, TraderRegistrationError
 from services.auth import require_role
 from services.sms import sms_service
 from schemas.trader import (
@@ -42,6 +45,8 @@ from schemas.trader import (
     TraderListItem,
     TraderLedgerResponse,
     LedgerEntryResponse,
+    TraderPaymentResponse,
+    TraderPaymentsListResponse,
     TraderPayoutDetailsUpdate,
 )
 from schemas.pool import PoolResponse
@@ -67,64 +72,18 @@ def register_trader(
     case, but a real one worth guarding against), registration fails
     loudly rather than silently overwriting someone's role.
     """
-    existing = db.query(Trader).filter(Trader.phone == payload.phone).first()
-    if existing:
-        raise HTTPException(
-            status_code=409,
-            detail=f"A trader with phone {payload.phone} already exists"
-        )
-
-    existing_identity = db.query(Identity).filter(
-        Identity.phone == payload.phone
-    ).first()
-    if existing_identity:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"This phone number is already registered as "
-                f"{existing_identity.role.value}. A phone number can "
-                f"only be linked to one role."
-            )
-        )
-
-    trader = Trader(
-        name=payload.name,
-        phone=payload.phone,
-        stall_number=payload.stall_number,
-        market_name=payload.market_name,
-    )
-    db.add(trader)
-    db.flush()   # Get the UUID before calling Nomba
-
     try:
-        account = virtual_account_service.create(
-            trader_id=str(trader.id),
-            trader_name=payload.name,
+        trader = register_trader_service(
+            db=db,
+            name=payload.name,
+            phone=payload.phone,
+            stall_number=payload.stall_number,
+            market_name=payload.market_name,
         )
-        trader.virtual_account_number = account["bank_account_number"]
-        trader.bank_name              = account["bank_name"]
-        trader.bank_account_name      = account["bank_account_name"]
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=502,
-            detail=f"Virtual account provisioning failed: {str(e)}"
-        )
-
-    # Create the linked Identity so this trader can log in via OTP
-    # and see their own balance/pools. This is a separate row from
-    # Trader on purpose — see models/identity.py's module docstring.
-    identity = Identity(
-        phone=payload.phone,
-        display_name=payload.name,
-        role=IdentityRole.TRADER,
-        market_name=payload.market_name,
-        linked_trader_id=trader.id,
-    )
-    db.add(identity)
-
-    db.commit()
-    db.refresh(trader)
+    except TraderRegistrationError as e:
+        msg = str(e)
+        status_code = 409 if "already" in msg else 502
+        raise HTTPException(status_code=status_code, detail=msg)
 
     background_tasks.add_task(
         sms_service.send_account_created,
@@ -308,6 +267,65 @@ def get_my_ledger(
             )
             for e in entries
         ],
+    )
+
+
+@router.get("/me/payments", response_model=TraderPaymentsListResponse)
+def get_my_payments(
+    identity: Identity = Depends(require_role(IdentityRole.TRADER)),
+    db: Session = Depends(get_db),
+):
+    """
+    GET /traders/me/payments
+
+    Real gap this closes: services/esusu.py's contribute endpoint
+    requires a real nomba_transaction_ref (see routers/esusu.py) tied
+    to a webhook-verified Payment row, but until this endpoint existed
+    there was no way for a trader to find their own transaction_ref
+    values from the frontend at all — only an admin-facing endpoint
+    (GET /reports/recent-payments) exposed Payment data, and that
+    isn't scoped to "my own payments" or accessible to a TRADER
+    identity.
+
+    Returns the logged-in trader's own recent Payment rows (most
+    recent first), each flagged with already_used_for_esusu so the
+    frontend can visually distinguish a payment that's still free to
+    use from one already consumed by a prior Esusu contribution —
+    contributing with an already-used reference is still rejected
+    server-side either way (see services/esusu.py's record_contribution),
+    this is purely to save the trader a failed attempt.
+    """
+    if identity.linked_trader_id is None:
+        raise HTTPException(status_code=404, detail="No linked trader record.")
+
+    payments = (
+        db.query(Payment)
+        .filter(Payment.trader_id == identity.linked_trader_id)
+        .order_by(Payment.received_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    used_payment_ids = {
+        row.payment_id
+        for row in db.query(EsusuContribution.payment_id).filter(
+            EsusuContribution.payment_id.in_([p.id for p in payments]),
+        ).all()
+        if row.payment_id is not None
+    }
+
+    return TraderPaymentsListResponse(
+        items=[
+            TraderPaymentResponse(
+                id=str(p.id),
+                amount_received=float(p.amount_received),
+                nomba_transaction_ref=p.nomba_transaction_ref,
+                pool_id=str(p.pool_id) if p.pool_id else None,
+                received_at=p.received_at,
+                already_used_for_esusu=p.id in used_payment_ids,
+            )
+            for p in payments
+        ]
     )
 
 
