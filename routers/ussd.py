@@ -7,10 +7,8 @@ Africa's Talking sends form-encoded POST data, not JSON.
 
 from fastapi import APIRouter, Form
 from fastapi.responses import PlainTextResponse
-from sqlalchemy.orm import Session
 
 from core.database import SessionLocal
-from models.trader import Trader
 from services.ussd import ussd_service
 
 router = APIRouter()
@@ -30,24 +28,26 @@ async def ussd_session(
         sessionId:   unique session identifier
         serviceCode: your USSD code e.g. *384#
         phoneNumber: caller's number e.g. +2348012345678
-        text:        cumulative input so far (empty on first dial)
+        text:        cumulative input so far (empty on first dial,
+                     then "1", "1*2", "1*2*Name", etc. as the caller
+                     navigates deeper into a flow)
 
-    Must return plain text starting with CON or END.
+    Must return plain text starting with CON (session continues) or
+    END (session terminates).
+
+    Real change from the old read-only version: this now hands the DB
+    session directly to services/ussd.py instead of only a
+    phone-lookup closure, since the interactive flows (register, join
+    a pool, join/create Esusu) need to run real queries and writes,
+    not just look up a trader by phone.
     """
     db = SessionLocal()
     try:
-        def get_trader_by_phone(phone: str):
-            # Normalize: strip +234 prefix, handle 0XX format
-            normalized = phone.replace("+234", "0").replace(" ", "")
-            return db.query(Trader).filter(
-                Trader.phone.in_([phone, normalized])
-            ).first()
-
         response = ussd_service.handle_session(
+            db=db,
             session_id=sessionId,
             phone_number=phoneNumber,
             text=text,
-            get_trader_by_phone=get_trader_by_phone,
         )
         return response
     finally:
