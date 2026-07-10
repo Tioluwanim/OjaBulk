@@ -28,6 +28,7 @@ from models.identity import Identity, IdentityRole
 from models.ledger_entry import LedgerEntry, EntryType
 from engine.refund import refund_pool
 from engine.payout import trigger_payout
+from services.pool_actions import join_pool_for_trader, PoolActionError
 from services.auth import require_role, get_current_identity, get_current_identity_optional
 from services.transfers import transfer_service
 from routers.auth import verify_admin_key
@@ -301,19 +302,6 @@ def join_pool(
     except ValueError:
         raise HTTPException(status_code=422, detail="trader_id must be a valid UUID")
 
-    pool = db.query(Pool).filter(Pool.id == pool_uuid).first()
-    if not pool:
-        raise HTTPException(status_code=404, detail="Pool not found")
-    if pool.status != PoolStatus.OPEN:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Pool is {pool.status.value} — cannot join a closed pool"
-        )
-
-    trader = db.query(Trader).filter(Trader.id == trader_uuid).first()
-    if not trader:
-        raise HTTPException(status_code=404, detail="Trader not found")
-
     if identity.linked_trader_id is None:
         raise HTTPException(
             status_code=404,
@@ -326,45 +314,21 @@ def join_pool(
             detail="You can only join pools for your own trader account."
         )
 
-    if pool.market_name and trader.market_name != pool.market_name:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                f"This pool is for {pool.market_name}, but your trader "
-                f"record belongs to {trader.market_name}."
-            )
-        )
+    try:
+        result = join_pool_for_trader(db, pool_uuid, trader_uuid)
+    except PoolActionError as e:
+        msg = str(e)
+        status_code = 404 if "not found" in msg else 400 if "closed" in msg else 403
+        raise HTTPException(status_code=status_code, detail=msg)
 
-    existing = db.query(PoolContribution).filter(
-        PoolContribution.trader_id == trader_uuid,
-        PoolContribution.pool_id == pool_uuid,
-        PoolContribution.status == ContributionStatus.LOCKED,
-    ).first()
-    if existing:
-        return PoolJoinResponse(
-            message=f"{trader.name} is already contributing to this pool",
-            trader_id=payload.trader_id,
-            pool_id=pool_id,
-            pool_title=pool.title,
-            target=float(pool.target_amount),
-            progress=_progress_pct(pool),
-        )
-
-    contribution = PoolContribution(
-        trader_id=trader_uuid,
-        pool_id=pool_uuid,
-        amount_locked=0,
-        status=ContributionStatus.LOCKED,
-    )
-    db.add(contribution)
-    db.commit()
+    pool = db.query(Pool).filter(Pool.id == pool_uuid).first()
 
     return PoolJoinResponse(
-        message=f"{trader.name} joined {pool.title}",
-        trader_id=payload.trader_id,
-        pool_id=pool_id,
-        pool_title=pool.title,
-        target=float(pool.target_amount),
+        message=result["message"],
+        trader_id=result["trader_id"],
+        pool_id=result["pool_id"],
+        pool_title=result["pool_title"],
+        target=result["target"],
         progress=_progress_pct(pool),
     )
 
