@@ -97,10 +97,48 @@ class USSDService:
         return phone
 
     def _get_trader_by_phone(self, db: Session, phone_number: str):
+        """
+        Real bug this fixes: this used to query Trader.phone directly
+        only. That works for a trader who registered with their own
+        phone number, but NOT for the demo/judge trader account (see
+        scripts/seed_demo_data.py's DEMO_TRADER_PHONE) -- which is
+        deliberately an Identity row whose `phone` is a fixed demo
+        number, pointing via linked_trader_id at an existing seeded
+        trader whose OWN Trader.phone is a completely different,
+        original seeded number. The web/OTP login path already
+        resolves through Identity -> linked_trader_id correctly (see
+        services/auth.py); USSD's phone lookup didn't, so dialling in
+        with the demo number correctly found no Trader row with that
+        exact phone and said "not registered" -- technically correct
+        for a raw Trader.phone match, but wrong for what a caller
+        using the demo/any indirected number actually expects.
+
+        Now checks Identity.phone (role=TRADER) -> linked_trader_id
+        FIRST, falling back to a direct Trader.phone match for a
+        trader who registered with their own number directly (the
+        normal case).
+        """
         normalized = self._normalize_phone(phone_number)
         alt = "+234" + normalized[1:] if normalized.startswith("0") else normalized
+        phone_variants = [phone_number, normalized, alt]
+
+        identity = (
+            db.query(Identity)
+            .filter(
+                Identity.phone.in_(phone_variants),
+                Identity.role == IdentityRole.TRADER,
+                Identity.linked_trader_id.isnot(None),
+            )
+            .order_by(Identity.created_at.desc())
+            .first()
+        )
+        if identity is not None:
+            trader = db.query(Trader).filter(Trader.id == identity.linked_trader_id).first()
+            if trader is not None:
+                return trader
+
         return db.query(Trader).filter(
-            Trader.phone.in_([phone_number, normalized, alt])
+            Trader.phone.in_(phone_variants)
         ).first()
 
     # ==========================================================
