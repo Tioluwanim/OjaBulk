@@ -130,3 +130,28 @@ class TraderLedgerResponse(BaseModel):
     trader_name: str
     current_spendable: float
     entries: list[LedgerEntryResponse]
+
+
+class TraderPaymentResponse(BaseModel):
+    """
+    A trader's own recent Payment rows, exposed so they have a way to
+    find the nomba_transaction_ref they need when contributing to an
+    Esusu round (see routers/esusu.py's contribute endpoint, which
+    requires a real, webhook-verified Payment reference rather than
+    self-attestation). Without this endpoint, a trader has no way to
+    discover their own transaction_ref values from the frontend at all.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    amount_received: float
+    nomba_transaction_ref: str
+    pool_id: str | None = None
+    received_at: datetime
+    already_used_for_esusu: bool = False
+
+
+class TraderPaymentsListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    items: list[TraderPaymentResponse]
