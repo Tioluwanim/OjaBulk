@@ -262,8 +262,9 @@ class USSDService:
 
         return (
             f"END Welcome to OjaBulk, {trader.name.split()[0]}!\n"
-            f"Your account: {trader.virtual_account_number}\n"
-            f"Send money there to start contributing."
+            f"Send money to:\n"
+            f"{trader.virtual_account_number} ({trader.bank_name})\n"
+            f"Name: {trader.bank_account_name}"
         )
 
     # ==========================================================
@@ -275,7 +276,9 @@ class USSDService:
             f"END OjaBulk Account\n"
             f"Spendable: \u20a6{trader.spendable_balance:,.0f}\n"
             f"Locked in pools: \u20a6{self._get_total_locked(trader):,.0f}\n"
-            f"Account: {trader.virtual_account_number}"
+            f"Send money to:\n"
+            f"{trader.virtual_account_number} ({trader.bank_name})\n"
+            f"Name: {trader.bank_account_name}"
         )
 
     def _get_total_locked(self, trader) -> float:
@@ -329,7 +332,8 @@ class USSDService:
         return (
             f"END Joined {result['pool_title']}!\n"
             f"Target: \u20a6{result['target']:,.0f}\n"
-            f"Send money to your OjaBulk account to contribute."
+            f"Send to: {trader.virtual_account_number} ({trader.bank_name})\n"
+            f"Name: {trader.bank_account_name}"
         )
 
     # ==========================================================
